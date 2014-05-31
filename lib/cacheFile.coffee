@@ -55,35 +55,39 @@ CacheFile::getMeta = ->
 Once a file has been written out it should be saved with optional
 cache metadata
 ###
-CacheFile::save = (meta) ->
+CacheFile::save = (upstreamResponse) ->
   self = this
-  meta = {}  unless meta
+  meta = upstreamResponse.headers or {}
   meta.expiry = meta.expiry or moment().add("minutes", 30)
-  Q.all([
-    @makeTree("data")
-    @makeTree("meta")
-    @makeTree("temp-meta")
-  ]).then(->
-    FS.write self.getPath("temp-meta"), JSON.stringify(meta)
-  ).then(->
-    Q.all [
-      FS.isFile(self.getPath("data"))
-      FS.isFile(self.getPath("meta"))
-    ]
-  ).then((files) ->
-    proms = []
-    proms.push FS.remove(self.getPath("data"))  if files[0]
-    proms.push FS.remove(self.getPath("meta"))  if files[1]
-    Q.all proms
-  ).then(->
-    self._writer.move self.getPath("data")
-  ).then ->
-    self._writer = null
-    FS.move self.getPath("temp-meta"), self.getPath("meta")
+  meta._status = upstreamResponse.status
+  if upstreamResponse < 300
+    Q.all([
+      @makeTree("data")
+      @makeTree("meta")
+      @makeTree("temp-meta")
+    ]).then(->
+      FS.write self.getPath("temp-meta"), JSON.stringify(meta)
+    ).then(->
+      Q.all [
+        FS.isFile(self.getPath("data"))
+        FS.isFile(self.getPath("meta"))
+      ]
+    ).then((files) ->
+      proms = []
+      proms.push FS.remove(self.getPath("data"))  if files[0]
+      proms.push FS.remove(self.getPath("meta"))  if files[1]
+      Q.all proms
+    ).then(->
+      self._writer.move self.getPath("data")
+    ).then ->
+      self._writer = null
+      FS.move self.getPath("temp-meta"), self.getPath("meta")
+  else
+    do Q
 
 
 CacheFile::makeTree = (type) ->
-  type = "data"  unless type
+  type = "data" unless type
   dir = Path.dirname(@getPath(type))
   FS.makeTree dir
 

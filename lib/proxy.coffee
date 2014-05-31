@@ -91,19 +91,23 @@ Proxy::_appCacheable = (request, cacheFile) ->
   self = this
   
   # either we're the first one in
-  unless @_collapsible[request.url]
-    @_collapsible[request.url] = cacheFile
-  else
-    
-    # or we should collapse this request
+  if @_collapsible[request.url] && @_collapsible[request.url] != undefined
+    # we should collapse this request
+    #@log @_collapsible[request.url]
     return @_appCollapse(request, @_collapsible[request.url])
+    
   cacheFile.expired().then (expired) ->
-    unless expired
-      cacheFile.getReader().then (reader) ->
-        self.log "Returning cached file for: " + request.url
-        Apps.ok reader
-    else
+    if expired
       self._appCacheFromUpstream request, cacheFile
+    else
+      self.log "Returning cached file for: " + request.url
+      Q.all([cacheFile.getReader(), cacheFile.getMeta()]).then (i) ->
+        reader = i[0]
+        meta = i[1]
+        self._appComplete request, cacheFile
+        response = Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
+        response.headers['location'] = meta['location'] if meta['location']
+        response
 
 
 ###
@@ -112,36 +116,67 @@ another client
 ###
 Proxy::_appCollapse = (request, cacheFile) ->
   @log "Collapsing: " + request.url
-  cacheFile.getReader().then (reader) ->
-    Apps.ok reader
+  Q.all([cacheFile.getReader(), cacheFile.getMeta()]).then (res) ->
+    reader = res[0]
+    meta = res[1]
+    Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
+
+Proxy::_appComplete = (request, cacheFile) ->
+  # see https://github.com/jashkenas/underscore/issues/311
+  #@_collapsible = _(@_collapsible).chain().pairs()
+  #  .select ([k, v]) ->
+  #    v != cacheFile
+  #  .mash().value()
+  @_collapsible = (x for x in @_collapsible when x != cacheFile)
 
 ###
 Grab something from upstream that doesn't have any cache yet and store it
 ###
 Proxy::_appCacheFromUpstream = (request, cacheFile) ->
+  @_collapsible[request.url] = cacheFile
   cacheWriter = undefined
   @log "Fetching from upstream: " + request.url
   appProm = undefined
   reader = undefined
   self = this
+  d = Q.defer()
+
+  req = HTTP.request(request.url)
+
   Q.all([cacheFile.getWriter(), cacheFile.getReader()]).then (res) ->
     cacheWriter = res[0]
     reader = res[1]
-    req = HTTP.request(request.url).then((upstreamResponse) ->
-      upstreamResponse.body.forEach((chunk) ->
-        cacheWriter.write chunk
-      ).then ->
-        cacheWriter.close()
 
-    ).then(->
-      cacheFile.save()
-    ).finally(->
-      delete self._collapsible[request.url]
+    req
+      .then (upstreamResponse) ->
+        upstreamResponse.body.forEach (chunk) ->
+          cacheWriter.write chunk
+        .then ->
+          cacheWriter.close()
 
-      self._removeCompletedRequests()
-    )
-    self._active.push req
-    Apps.ok reader
+        d.resolve
+          reader: reader
+          headers: upstreamResponse.headers or { 'content-type': 'text/plain' }
+          status: upstreamResponse.status or 200
+
+        upstreamResponse
+
+      .then (upstreamResponse) ->
+        cacheFile.save(upstreamResponse)
+
+      .finally ->
+        self._appComplete request, cacheFile
+        self._removeCompletedRequests()
+
+      self._active.push req
+
+  d.promise
+    .then (res_) ->
+      if res_.status > 300 and res_.status < 400
+        self.log "Redirecting " + request.url + " to " + res_.headers.location
+        Apps.redirect request, res_.headers.location, res_.status
+      else
+        Apps.ok res_.reader, res_.headers['content-type'], res_.status
 
 
 Proxy::_removeCompletedRequests = ->
