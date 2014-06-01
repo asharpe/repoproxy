@@ -64,7 +64,7 @@ Proxy::connectProxy = (res, socket, bodyHead) ->
   self = this
   endpoint = res.url.split ':'
 
-  @log "{#{request.k}} CONNECT #{res.url}"
+  @log "{CONNECT} #{res.url}"
 
   serviceSocket = new net.Socket()
     .addListener('data', (data) ->
@@ -104,6 +104,7 @@ Proxy::_appCacheable = (request, cacheFile) ->
     return @_appCollapse(request, @_collapsible[request.url])
     
   cacheFile.expired().then (expired) ->
+    return self._appCacheFromUpstream request, cacheFile
     if expired
       self._appCacheFromUpstream request, cacheFile
     else
@@ -145,14 +146,28 @@ Proxy::_appCacheFromUpstream = (request, cacheFile) ->
   cacheWriter = undefined
   appProm = undefined
   reader = undefined
+  meta = undefined
   self = this
   d = Q.defer()
 
-  req = HTTP.request(request.url)
+  p = cacheFile.getMeta().then (m) ->
+    return HTTP.request(request.url) if not m
+
+    meta = m
+
+    # otherwise we'll try and send if-none-match etc
+    r =
+      url: request.url
+      headers: _.clone(request.headers)
+
+    r.headers['if-none-match'] = m.etag if m.etag
+    r.headers['if-modified-since'] = m['last-modified'] if m['last-modified']
+    HTTP.request(r)
 
   Q.all([cacheFile.getWriter(), cacheFile.getReader()]).then (res) ->
     cacheWriter = res[0]
     reader = res[1]
+    req = p
 
     req
       .then (upstreamResponse) ->
@@ -179,12 +194,22 @@ Proxy::_appCacheFromUpstream = (request, cacheFile) ->
 
   d.promise
     .then (res_) ->
-      if res_.status > 300 and res_.status < 400
-        request.log "redirecting to " + res_.headers.location
-        Apps.redirect request, res_.headers.location, res_.status
-      else
-        request.log "sending upstream response"
-        Apps.ok res_.reader, res_.headers['content-type'], res_.status
+      switch
+        when res_.status == 304
+          request.log "not modified"
+          # serve the cached version
+          cacheFile.getReader().then (reader) ->
+            Apps.ok reader, meta['content-type'], meta._status
+
+        when res_.status > 300 and res_.status < 400
+          request.log "redirecting to " + res_.headers.location
+          Apps.redirect request, res_.headers.location, res_.status
+
+        else
+          request.log "sending upstream response"
+          res = Apps.ok res_.reader, res_.headers['content-type'], res_.status
+          res.headers['content-length'] = res_.headers['content-length'] if res_.headers['content-length']
+          res
 
 
 Proxy::_removeCompletedRequests = ->
