@@ -10,9 +10,11 @@ Proxy = (opts) ->
   @_cacher = new Cacher(opts)
   @_collapsible = {}
   @_active = []
+  @_counter = 0
   this
 
 Q = require("q")
+#Q.longStackSupport = true;
 HTTP = require("q-io/http")
 Apps = require("q-io/http-apps")
 Reader = require("q-io/reader")
@@ -31,15 +33,21 @@ This is the entry point in to the proxy, a request comes in,
 a response goes out.
 ###
 Proxy::application = (request) ->
-  @normaliseRequest request
-  @log "Incoming request for: " + request.url
   self = this
+  @normaliseRequest request
+
+  request.k = @_counter++
+  request.log = (message) ->
+    self.log "[#{request.k}] #{message}"
+
+  @log "{#{request.k}} #{request.url}"
+
   @_cacher.getCacheFile(request.url).then((cacheFile) ->
     if cacheFile
       self._appCacheable request, cacheFile
     else
       # not cacheable, just silently proxy
-      self.log "Silently proxying: " + request.url
+      request.log 'not caching'
       HTTP.request request.url
   ).fail((err) ->
     Apps.ok(
@@ -56,7 +64,7 @@ Proxy::connectProxy = (res, socket, bodyHead) ->
   self = this
   endpoint = res.url.split ':'
 
-  @log "CONNECT request for: " + res.url
+  @log "{#{request.k}} CONNECT #{res.url}"
 
   serviceSocket = new net.Socket()
     .addListener('data', (data) ->
@@ -80,7 +88,7 @@ We seem to get corrupted requests through when acting as a proxy
 this just tries to fix them back up
 ###
 Proxy::normaliseRequest = (request) ->
-  request.url = request.path  if request.path.match(/^http:\/\//)
+  request.url = request.path if request.path.match(/^http:\/\//)
 
 
 ###
@@ -93,14 +101,13 @@ Proxy::_appCacheable = (request, cacheFile) ->
   # either we're the first one in
   if @_collapsible[request.url] && @_collapsible[request.url] != undefined
     # we should collapse this request
-    #@log @_collapsible[request.url]
     return @_appCollapse(request, @_collapsible[request.url])
     
   cacheFile.expired().then (expired) ->
     if expired
       self._appCacheFromUpstream request, cacheFile
     else
-      self.log "Returning cached file for: " + request.url
+      request.log "sending cached response"
       Q.all([cacheFile.getReader(), cacheFile.getMeta()]).then (i) ->
         reader = i[0]
         meta = i[1]
@@ -114,28 +121,28 @@ Proxy::_appCacheable = (request, cacheFile) ->
 We're attaching to a cacheable request that is already being downloaded by
 another client
 ###
-Proxy::_appCollapse = (request, cacheFile) ->
-  @log "Collapsing: " + request.url
+Proxy::_appCollapse = (request, active) ->
+  cacheFile = active.cacheFile
+  request.log "collapsing into {#{active.request.k}}"
   Q.all([cacheFile.getReader(), cacheFile.getMeta()]).then (res) ->
     reader = res[0]
     meta = res[1]
     Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
 
+
 Proxy::_appComplete = (request, cacheFile) ->
-  # see https://github.com/jashkenas/underscore/issues/311
-  #@_collapsible = _(@_collapsible).chain().pairs()
-  #  .select ([k, v]) ->
-  #    v != cacheFile
-  #  .mash().value()
-  @_collapsible = (x for x in @_collapsible when x != cacheFile)
+  #@_collapsible = (x for x in @_collapsible when x != cacheFile)
+  delete @_collapsible[request.url]
+
 
 ###
 Grab something from upstream that doesn't have any cache yet and store it
 ###
 Proxy::_appCacheFromUpstream = (request, cacheFile) ->
-  @_collapsible[request.url] = cacheFile
+  @_collapsible[request.url] =
+    cacheFile: cacheFile
+    request: request
   cacheWriter = undefined
-  @log "Fetching from upstream: " + request.url
   appProm = undefined
   reader = undefined
   self = this
@@ -173,9 +180,10 @@ Proxy::_appCacheFromUpstream = (request, cacheFile) ->
   d.promise
     .then (res_) ->
       if res_.status > 300 and res_.status < 400
-        self.log "Redirecting " + request.url + " to " + res_.headers.location
+        request.log "redirecting to " + res_.headers.location
         Apps.redirect request, res_.headers.location, res_.status
       else
+        request.log "sending upstream response"
         Apps.ok res_.reader, res_.headers['content-type'], res_.status
 
 
@@ -210,4 +218,3 @@ Expose the underlying address function
 Proxy::address = ->
   @_server.address()
 
-# vim: sw=2 ts=2 et

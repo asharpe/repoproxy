@@ -70,7 +70,9 @@ if we're in lock step we just feed info from the writer straight on
 to our reader
 ###
 WriterReader::_startLockStep = (cb) ->
-  return Q()  if @_writer.closed
+  if @_writer.closed
+    console.log "writer closed"
+    return Q()
   deferred = Q.defer()
   self = this
   @_writer.on "write", (chunk) ->

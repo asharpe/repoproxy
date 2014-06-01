@@ -60,7 +60,7 @@ CacheFile::save = (upstreamResponse) ->
   meta = upstreamResponse.headers or {}
   meta.expiry = meta.expiry or moment().add("minutes", 30)
   meta._status = upstreamResponse.status
-  if upstreamResponse < 300
+  if upstreamResponse.status < 300
     Q.all([
       @makeTree("data")
       @makeTree("meta")
