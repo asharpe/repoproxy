@@ -1,6 +1,6 @@
 Proxy = (opts) ->
   @_listening = false
-  self = this
+  self = @
   @_server = HTTP.Server((request) ->
     self.application request
   )
@@ -24,6 +24,7 @@ net = require("net")
 _ = require("underscore")
 Cacher = require("./cacher")
 util.inherits Proxy, Events.EventEmitter
+moment = require('moment')
 module.exports = Proxy
 
 ###
@@ -33,35 +34,35 @@ This is the entry point in to the proxy, a request comes in,
 a response goes out.
 ###
 Proxy::application = (request) ->
-  self = this
+  self = @
   @normaliseRequest request
 
   request.k = @_counter++
   request.log = (message) ->
-    self.log "[#{request.k}] #{message}"
+    self.log "{#{request.k}} #{message}"
 
-  @log "{#{request.k}} #{request.url}"
+  @log "[#{request.k}] #{request.url}"
 
-  @_cacher.getCacheFile(request.url).then((cacheFile) ->
-    if cacheFile
-      self._appCacheable request, cacheFile
-    else
-      # not cacheable, just silently proxy
-      request.log 'not caching'
-      HTTP.request request.url
-  ).fail((err) ->
-    Apps.ok(
-      "#{err}", # just conver the error to string for now
-      'text/plain',
-      502 # gateway error - probably true
-    )
-  )
+  @_cacher.getCacheFile(request.url)
+    .then (cacheFile) ->
+      if cacheFile
+        self._appCacheable request, cacheFile
+      else
+        # not cacheable, just silently proxy
+        request.log 'passthrough - not caching'
+        HTTP.request request.url
+    .fail (err) ->
+      Apps.ok(
+        "#{err}", # just convert the error to string for now
+        'text/plain',
+        502 # gateway error - probably true
+      )
+
 
 ###
 This is the entry point in to the proxy for CONNECT requests
 ###
 Proxy::connectProxy = (res, socket, bodyHead) ->
-  self = this
   endpoint = res.url.split ':'
 
   @log "{CONNECT} #{res.url}"
@@ -96,26 +97,36 @@ The application to respond with if the request corresponds to
 something that could be cached
 ###
 Proxy::_appCacheable = (request, cacheFile) ->
-  self = this
+  self = @
   
-  # either we're the first one in
+  # if there's a request in progress ...
   if @_collapsible[request.url] && @_collapsible[request.url] != undefined
     # we should collapse this request
     return @_appCollapse(request, @_collapsible[request.url])
-    
-  cacheFile.expired().then (expired) ->
-    return self._appCacheFromUpstream request, cacheFile
-    if expired
-      self._appCacheFromUpstream request, cacheFile
-    else
-      request.log "sending cached response"
-      Q.all([cacheFile.getReader(), cacheFile.getMeta()]).then (i) ->
-        reader = i[0]
-        meta = i[1]
-        self._appComplete request, cacheFile
-        response = Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
-        response.headers['location'] = meta['location'] if meta['location']
-        response
+
+  # otherwise let's check the cached file ...
+  Q.all([
+    cacheFile.expired()
+    cacheFile.getMeta()
+  ])
+    .then (info) ->
+      expired = info[0]
+      meta = info[1]
+
+      # expired means that it has an expiry, or it's not been used in the last 30 minutes
+      if expired
+        return self._appCacheFromUpstream request, cacheFile
+
+      else
+        request.log "sending cached response"
+        cacheFile.markUpdated()
+        cacheFile.getReader()
+          .then (reader) ->
+            self._appComplete request, cacheFile
+            response = Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
+            # TODO are we caching redirects?  I think we might be following them without caching further down
+            response.headers['location'] = meta['location'] if meta['location']
+            response
 
 
 ###
@@ -147,15 +158,19 @@ Proxy::_appCacheFromUpstream = (request, cacheFile) ->
   appProm = undefined
   reader = undefined
   meta = undefined
-  self = this
+  self = @
   d = Q.defer()
 
+  # check for metadata
   p = cacheFile.getMeta().then (m) ->
+    # if there's none, let's just request upstream and cache it
     return HTTP.request(request.url) if not m
 
+    # this is used after we receive a response from upstream (after this method)
+    # TODO there's likely a neater way to do this
     meta = m
 
-    # otherwise we'll try and send if-none-match etc
+    # otherwise we'll try to send if-none-match or if-modified-since
     r =
       url: request.url
       headers: _.clone(request.headers)
@@ -169,8 +184,10 @@ Proxy::_appCacheFromUpstream = (request, cacheFile) ->
     reader = res[1]
     req = p
 
+    # this request may have asked for if-none-match or if-modified-since
     req
       .then (upstreamResponse) ->
+        # these may be no-ops
         upstreamResponse.body.forEach (chunk) ->
           cacheWriter.write chunk
         .then ->
@@ -197,9 +214,11 @@ Proxy::_appCacheFromUpstream = (request, cacheFile) ->
       switch
         when res_.status == 304
           request.log "not modified"
+          cacheFile.markUpdated()
           # serve the cached version
-          cacheFile.getReader().then (reader) ->
-            Apps.ok reader, meta['content-type'], meta._status
+          cacheFile.getReader()
+            .then (reader) ->
+              Apps.ok reader, meta['content-type'], meta._status
 
         when res_.status > 300 and res_.status < 400
           request.log "redirecting to " + res_.headers.location
@@ -222,7 +241,7 @@ Proxy::_removeCompletedRequests = ->
 Start the proxy listening
 ###
 Proxy::listen = ->
-  self = this
+  self = @
   return Q()  if @_listening
   @_server.listen(@_port).then ->
     self._listening = true

@@ -26,7 +26,8 @@ function cleanAndQueue() {
 		console.log("Clean completed");
 		setTimeout(function() {
 			cleanAndQueue();
-		}, 30*60*1000);
+		}, (config.cleanInterval || 30)*60*1000);
 	});
 }
 cleanAndQueue();
+

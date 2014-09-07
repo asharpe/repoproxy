@@ -16,8 +16,10 @@ CacheFile = (cacheDir, file) ->
   @_file = file
   @_writer = null
 
+console = require('console')
 Q = require("q")
 FS = require("q-io/fs")
+fs = require("fs")
 Reader = require("q-io/reader")
 Path = require("path")
 moment = require("moment")
@@ -41,14 +43,34 @@ CacheFile::getPath = (type) ->
 CacheFile::getMeta = ->
   path = @getPath("meta")
   FS.isFile(path).then (isFile) ->
+    # we'll get the contents and the last modified, knowing that
+    # the proxy will update the last modified for any requests that
+    # don't come with an expiry (eg, etag, last-modified)
     if isFile
-      FS.read(path).then (contents) ->
+      Q.all([
+        FS.read path
+        FS.stat path
+      ]).then (data) ->
+        contents = data[0]
+        stat = data[1]
         try
-          return JSON.parse(contents)
+          meta = JSON.parse(contents)
+          meta.mtime = stat.node.mtime
+          meta
         catch e
           return {}
     else
       Q()
+
+
+CacheFile::markUpdated = ->
+  path = @getPath('meta')
+  FS.isFile(path).then (isFile) ->
+    try
+      now = moment().toDate()
+      fs.utimes(path, now, now) if isFile
+    catch e
+      console.log(e)
 
 
 ###
@@ -58,7 +80,10 @@ cache metadata
 CacheFile::save = (upstreamResponse) ->
   self = this
   meta = upstreamResponse.headers or {}
-  meta.expiry = meta.expiry or moment().add("minutes", 30)
+  # we'll only add an expiry if there's no ETag or Last-Modified headers
+  if not meta.expiry and not (meta.etag or meta['last-modified'])
+    meta.expiry = moment().add('minutes', 30)
+  #meta.expiry = meta.expiry or moment().add("minutes", 30)
   meta._status = upstreamResponse.status
   if upstreamResponse.status < 300
     Q.all([
@@ -74,8 +99,8 @@ CacheFile::save = (upstreamResponse) ->
       ]
     ).then((files) ->
       proms = []
-      proms.push FS.remove(self.getPath("data"))  if files[0]
-      proms.push FS.remove(self.getPath("meta"))  if files[1]
+      proms.push FS.remove(self.getPath("data")) if files[0]
+      proms.push FS.remove(self.getPath("meta")) if files[1]
       Q.all proms
     ).then(->
       self._writer.move self.getPath("data")
@@ -96,9 +121,38 @@ CacheFile::makeTree = (type) ->
 Check simple metadata for whether it's expired or not
 ###
 CacheFile::expired = ->
-  @getMeta().then (meta) ->
-    not meta or not meta.expiry or moment(meta.expiry) < moment()
+  @getMeta()
+    .then (meta) ->
+      not meta or (
+        # if there was a time, check that
+        (meta.expiry and moment(meta.expiry) < moment()) or
+        # or check if it's been recently accessed
+        (not meta.expiry and
+          moment(meta.mtime) < moment().subtract('minutes', 30)
+        )
+      )
 
+
+###
+Extra checks for files with etag or last-modified
+###
+CacheFile::expiredForCleaner = ->
+  Q.all([
+    @expired
+    @getMeta
+  ])
+    .then (i) ->
+      expired = i[0]
+      meta = i[1]
+
+      # simple case
+      return false if not expired
+
+      # if it was expired because it owns an expiry, that's valid
+      return true if meta.expiry
+
+      # we'll keep other things for a while longer
+      moment(meta.mtime) < moment().subtract('months', 9)
 
 
 ###
@@ -149,12 +203,12 @@ Get a stream reader
 CacheFile::getReader = ->
   self = this
   @expired().then (expired) ->
-    unless expired
-      FS.open self.getPath(),
-        flags: "rb"
-
-    else
+    if expired
       self.getWriter().then (writer) ->
         writer.getReader()
+
+    else
+      FS.open self.getPath(),
+        flags: "rb"
 
 

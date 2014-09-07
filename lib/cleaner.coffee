@@ -17,32 +17,28 @@ class Cleaner
 		@ended = false
 
 	clean: ->
-		self = this
+		self = @
 		FS.isDirectory(@dataDir)
-		.then((isDir) -> 
-			if isDir then self.cleanDataDir()
-		)
+			.then (isDir) ->
+				self.cleanDataDir() if isDir
 
 	cleanDataDir: () ->
-		self = this
+		self = @
 		deferred = Q.defer()
 		finder = FindIt.find(@dataDir)
 
-		finder.on('file', (file) ->
+		finder.on 'file', (file) ->
 			self.active++
 			self.cleanDataFile(file)
-			.then(->
-				self.active--
-				if (self.active == 0 && self.ended)
-					deferred.resolve()
-			)
-		)
+				.then ->
+					self.active--
+					if (self.active == 0 && self.ended)
+						deferred.resolve()
 
-		finder.on('end', ->
+		finder.on 'end', ->
 			self.ended = true
 			if (self.active == 0)
 				deferred.resolve()
-		)
 
 		deferred.promise
 
@@ -50,8 +46,8 @@ class Cleaner
 		cacheFile = new CacheFile(
 			@cacheDir, FS.relativeFromDirectory(@dataDir, file)
 		)
-		cacheFile.expired().then((expired) ->
-			if expired then cacheFile.purge()
-		)
+		cacheFile.expiredForCleaner().then (expired) ->
+			if expired then cacheFile.purge
 
 module.exports = Cleaner
+
