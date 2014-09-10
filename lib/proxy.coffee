@@ -47,11 +47,14 @@ Proxy::application = (request) ->
     .then (cacheFile) ->
       if cacheFile
         self._appCacheable request, cacheFile
+
       else
         # not cacheable, just silently proxy
         request.log 'passthrough - not caching'
         HTTP.request request.url
+
     .fail (err) ->
+      request.log "#{err}"
       Apps.ok(
         "#{err}", # just convert the error to string for now
         'text/plain',
@@ -192,6 +195,8 @@ Proxy::_appCacheFromUpstream = (request, cacheFile) ->
           cacheWriter.write chunk
         .then ->
           cacheWriter.close()
+        .then ->
+          request.log "done"
 
         d.resolve
           reader: reader
@@ -225,7 +230,7 @@ Proxy::_appCacheFromUpstream = (request, cacheFile) ->
           Apps.redirect request, res_.headers.location, res_.status
 
         else
-          request.log "sending upstream response"
+          request.log "sending upstream response ..."
           res = Apps.ok res_.reader, res_.headers['content-type'], res_.status
           res.headers['content-length'] = res_.headers['content-length'] if res_.headers['content-length']
           res
