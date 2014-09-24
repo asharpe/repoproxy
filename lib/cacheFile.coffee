@@ -83,7 +83,7 @@ CacheFile::save = (upstreamResponse) ->
   # we'll only add an expiry if there's no ETag or Last-Modified headers
   if not meta.expiry and not (meta.etag or meta['last-modified'])
     meta.expiry = moment().add('minutes', 30)
-  #meta.expiry = meta.expiry or moment().add("minutes", 30)
+
   meta._status = upstreamResponse.status
   if upstreamResponse.status < 300
     Q.all([
@@ -126,7 +126,7 @@ CacheFile::expired = ->
       not meta or (
         # if there was a time, check that
         (meta.expiry and moment(meta.expiry) < moment()) or
-        # or check if it's been recently accessed
+        # or see if it's been recently checked
         (not meta.expiry and
           moment(meta.mtime) < moment().subtract('minutes', 30)
         )
@@ -201,14 +201,6 @@ CacheFile::_getNewWriter = ->
 Get a stream reader
 ###
 CacheFile::getReader = ->
-  self = this
-  @expired().then (expired) ->
-    if expired
-      self.getWriter().then (writer) ->
-        writer.getReader()
-
-    else
-      FS.open self.getPath(),
-        flags: "rb"
-
+  Q @_writer?.getReader() or FS.open @getPath(),
+    flags: 'rb'
 

@@ -122,7 +122,6 @@ Proxy::_appCacheable = (request, cacheFile) ->
 
       else
         request.log "sending cached response"
-        cacheFile.markUpdated()
         cacheFile.getReader()
           .then (reader) ->
             self._appComplete request, cacheFile
@@ -146,7 +145,6 @@ Proxy::_appCollapse = (request, active) ->
 
 
 Proxy::_appComplete = (request, cacheFile) ->
-  #@_collapsible = (x for x in @_collapsible when x != cacheFile)
   delete @_collapsible[request.url]
 
 
@@ -157,83 +155,66 @@ Proxy::_appCacheFromUpstream = (request, cacheFile) ->
   @_collapsible[request.url] =
     cacheFile: cacheFile
     request: request
-  cacheWriter = undefined
-  appProm = undefined
-  reader = undefined
-  meta = undefined
   self = @
-  d = Q.defer()
 
   # check for metadata
-  p = cacheFile.getMeta().then (m) ->
-    # if there's none, let's just request upstream and cache it
-    return HTTP.request(request.url) if not m
-
-    # this is used after we receive a response from upstream (after this method)
-    # TODO there's likely a neater way to do this
-    meta = m
-
-    # otherwise we'll try to send if-none-match or if-modified-since
+  cacheFile.getMeta().then (meta) ->
+    # default request
     r =
       url: request.url
       headers: _.clone(request.headers)
 
-    r.headers['if-none-match'] = m.etag if m.etag
-    r.headers['if-modified-since'] = m['last-modified'] if m['last-modified']
-    HTTP.request(r)
+    # we'll try to send if-none-match or if-modified-since if we can
+    if meta
+      r.headers['if-none-match'] = meta.etag if meta.etag
+      r.headers['if-modified-since'] = meta['last-modified'] if meta['last-modified']
 
-  Q.all([cacheFile.getWriter(), cacheFile.getReader()]).then (res) ->
-    cacheWriter = res[0]
-    reader = res[1]
-    req = p
+    # make the request
+    upstreamRequest = HTTP.request(r)
 
-    # this request may have asked for if-none-match or if-modified-since
-    req
-      .then (upstreamResponse) ->
-        # these may be no-ops
-        upstreamResponse.body.forEach (chunk) ->
-          cacheWriter.write chunk
-        .then ->
-          cacheWriter.close()
-        .then ->
-          request.log "done"
+    # and keep track of it
+    self._active.push upstreamRequest
 
-        d.resolve
-          reader: reader
-          headers: upstreamResponse.headers or { 'content-type': 'text/plain' }
-          status: upstreamResponse.status or 200
-
-        upstreamResponse
-
-      .then (upstreamResponse) ->
-        cacheFile.save(upstreamResponse)
-
-      .finally ->
-        self._appComplete request, cacheFile
-        self._removeCompletedRequests()
-
-      self._active.push req
-
-  d.promise
-    .then (res_) ->
+    upstreamRequest.then (upstreamResponse) ->
       switch
-        when res_.status == 304
-          request.log "not modified"
+        when upstreamResponse.status == 304
+          request.log "not modified, sending cached response"
           cacheFile.markUpdated()
-          # serve the cached version
-          cacheFile.getReader()
-            .then (reader) ->
-              Apps.ok reader, meta['content-type'], meta._status
+          cacheFile.getReader().then (reader) ->
+            response = Apps.ok reader, meta['content-type'], meta._status
+            _.defaults response.headers, _.omit meta, [
+              '_status'
+              'mtime'
+              'content-length'
+            ]
+            response
 
-        when res_.status > 300 and res_.status < 400
-          request.log "redirecting to " + res_.headers.location
-          Apps.redirect request, res_.headers.location, res_.status
+        when upstreamResponse.status > 300 and upstreamResponse.status < 400
+          request.log "redirecting to " + upstreamResponse.headers.location
+          Apps.redirect request, upstreamResponse.headers.location, upstreamResponse.status
 
         else
           request.log "sending upstream response ..."
-          res = Apps.ok res_.reader, res_.headers['content-type'], res_.status
-          res.headers['content-length'] = res_.headers['content-length'] if res_.headers['content-length']
-          res
+          # we must make sure we've got the writer before getting the reader ...
+          cacheFile.getWriter().then (writer) ->
+            [cacheFile.getReader(), writer]
+          .spread (reader, cacheWriter) ->
+            upstreamResponse.body.forEach (chunk) ->
+              cacheWriter.write chunk
+            .then ->
+              cacheWriter.close()
+              cacheFile.save(upstreamResponse)
+            .then ->
+              request.log "done"
+
+            response = Apps.ok reader, upstreamResponse.headers['content-type'], upstreamResponse.status
+            response.headers['content-length'] = upstreamResponse.headers['content-length'] if upstreamResponse.headers['content-length']
+            response
+
+  .finally ->
+    self._appComplete request, cacheFile
+    self._removeCompletedRequests()
+
 
 
 Proxy::_removeCompletedRequests = ->
