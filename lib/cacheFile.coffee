@@ -91,7 +91,11 @@ CacheFile::save = (upstreamResponse) ->
       @makeTree("meta")
       @makeTree("temp-meta")
     ]).then(->
-      FS.write self.getPath("temp-meta"), JSON.stringify(meta)
+      FS.write self.getPath("temp-meta"), JSON.stringify _.omit meta, [
+          'connection',
+          'keep-alive',
+          'accept-ranges',
+        ]
     ).then(->
       Q.all [
         FS.isFile(self.getPath("data"))
