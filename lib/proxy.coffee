@@ -41,6 +41,8 @@ Proxy::application = (request) ->
   request.k = @_counter++
   request.log = (messages...) =>
     @log "{#{request.k}}", messages...
+  request.debug = (messages...) =>
+    @log "{#{request.k}}", messages... if process.env.debug_proxy?
 
   @log "[#{request.k}] #{request.url}"
 
@@ -72,18 +74,15 @@ Proxy::connectProxy = (res, socket, bodyHead) ->
   @log "{CONNECT} #{res.url}"
 
   serviceSocket = new net.Socket()
-    .addListener('data', (data) ->
+    .addListener 'data', (data) ->
       socket.write data
-    )
-    .addListener('error', () ->
+    .addListener 'error', () ->
       socket.destroy()
-    )
     .connect (parseInt (endpoint[1] || '443')), endpoint[0]
 
   socket
-    .addListener('data', (data) ->
+    .addListener 'data', (data) ->
       serviceSocket.write data
-    )
     # tell the client it went OK, let's get to work
     .write "HTTP/1.0 200 OK\r\n\r\n"
 
@@ -101,6 +100,7 @@ The application to respond with if the request corresponds to
 something that could be cached
 ###
 Proxy::_appCacheable = (request, cacheFile) ->
+  app = @
 
   # if there's no request in progress, then this one is
   if not @_collapsible[request.url]
@@ -112,16 +112,15 @@ Proxy::_appCacheable = (request, cacheFile) ->
       _meta: undefined
 
       getMeta: (thisRequest) =>
-        #thisRequest.log 'getting metadata'
-        #return Q(@_meta) if @_meta
-        thisRequest.log 'getting metdata promise'
         @gettingMeta ?= @_getMeta(thisRequest)
 
       _getMeta: (thisRequest) =>
+        # sanity check - only the first request should get here
         throw new Error('invalid metadata fetch attempt') if @request != thisRequest
-        @request.log 'checking local metdata'
+
+        #@request.log 'checking local metdata'
         @cacheFile.getLocalMeta().then (meta) =>
-          @request.log 'local metadata', meta
+          @request.debug 'local metadata', meta
           # if the metadata is still valid, return it
           if (
             meta and (
@@ -129,7 +128,7 @@ Proxy::_appCacheable = (request, cacheFile) ->
               (not meta?.expiry and moment(meta?.mtime) > moment().subtract('minutes', 30))
             )
           )
-            @request.log 'metadata says not expired'
+            @request.debug 'metadata says not expired'
             @getReader = ->
               @cacheFile.getReader()
             return meta
@@ -146,10 +145,10 @@ Proxy::_appCacheable = (request, cacheFile) ->
             r.headers['if-modified-since'] = meta['last-modified'] if meta['last-modified']
 
           # make the request
-          @request.log 'getting upstream metadata', r
+          @request.debug 'getting upstream metadata', r
           @_upstreamRequest = HTTP.request(r)
           @_upstreamRequest.then (response) =>
-            @request.log 'upstream response', response.status
+            @request.debug 'upstream response', response.status
             meta = response.headers or {}
             meta._status = response.status
 
@@ -178,7 +177,7 @@ Proxy::_appCacheable = (request, cacheFile) ->
                 @getReader = ->
                   deferredReader.promise
 
-                #@request.log 'getting writer for', @cacheFile
+                @request.debug 'getting writer for', @cacheFile
                 @cacheFile.getWriter().then (writer) =>
                   # since we can only resolve the deferred once, that means there's a single
                   # reader for that deferred which is likely a problem if multiple clients get
@@ -196,25 +195,23 @@ Proxy::_appCacheable = (request, cacheFile) ->
                   deferredReader.resolve writer.getReader()
 
                   # write the response out
-                  @request.log 'writing response body'
+                  @request.debug 'writing response body'
                   response.body.forEach (chunk) ->
                     writer.write chunk
                   .then ->
                     writer.close()
-                    request.log 'finished writing cache file'
+                    request.debug 'finished writing cache file'
                     #cacheFile.save(upstreamResponse)
                     #  .fail (error)
                     #    deferred.fail error
 
                     # write the metadata last since new requests check for this first
                     cacheFile.saveMetadata meta
+                    app._appComplete request, response
                 .fail (error) =>
                   @request.log 'failsauce', error
                   error
 
-                # return metadata
-                #@request.log 'metadata', meta
-                #meta
                 deferredMeta.promise
 
       @
@@ -236,102 +233,6 @@ Proxy::_appCacheable = (request, cacheFile) ->
     # TODO are we caching redirects?  I think we might be following them without caching further down
     response.headers['location'] = meta['location'] if meta['location']
     response
-
-
-###
-We're attaching to a cacheable request that is already being downloaded by
-another client
-###
-Proxy::_appCollapse = (request, active) ->
-  request.log "collapsing into {#{active.request.k}}"
-  Q.linearise([
-    active.getReader(request)
-    (reader) ->
-      [
-        reader
-        active.cacheFile.getMeta()
-      ]
-  ]).spread (reader, meta) ->
-    request.log 'returning collapsed response'
-    Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
-  .fail (error) ->
-    request.log "#{error}"
-    Apps.ok(
-      "#{error}" # just convert the error to string for now
-      'text/plain'
-      502 # gateway error - probably true
-    )
-  .finally ->
-    request.log 'complete'
-
-
-  ###
-  active.getReader(request).then (reader) ->
-    active.cacheFile.getMeta().then (meta) ->
-    Q.all([
-      active.cacheFile.getMeta()
-      active.cacheFile.getReader()
-    ]).spread (reader, meta) ->
-      request.log 'returning collapsed response'
-      Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
-    .fail (error) ->
-      request.log "#{error}"
-      Apps.ok(
-        "#{error}" # just convert the error to string for now
-        'text/plain'
-        502 # gateway error - probably true
-      )
-    .finally ->
-      request.log 'complete'
-  ###
-  ###
-  Q.all([
-    Q.linearise([
-      active.getResponse(request)
-      active.cacheFile.getReader()
-    ])
-    active.cacheFile.getMeta()
-  ]).spread (reader, meta) ->
-    request.log 'returning collapsed response'
-    Apps.ok reader, meta?['content-type'] or 'text/plain', meta?._status or 200
-  .fail (error) ->
-    request.log "#{error}"
-    Apps.ok(
-      "#{error}" # just convert the error to string for now
-      'text/plain'
-      502 # gateway error - probably true
-    )
-  ###
-
-  ###
-  Q.all([cacheFile.getReader(), cacheFile.getMeta()]).then (res) ->
-    reader = res[0]
-    meta = res[1]
-    Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
-  .fail (error) ->
-    request.log "#{error}"
-    Apps.ok(
-      "#{error}" # just convert the error to string for now
-      'text/plain'
-      502 # gateway error - probably true
-    )
-  ###
-
-Proxy::_getUpstreamResource = (request, cacheFile) ->
-  # check for metadata
-  cacheFile.getMeta().then (meta) =>
-    # default request
-    r =
-      url: request.url
-      headers: _.clone(request.headers)
-
-    # we'll try to send if-none-match or if-modified-since if we can
-    if meta
-      r.headers['if-none-match'] = meta.etag if meta.etag
-      r.headers['if-modified-since'] = meta['last-modified'] if meta['last-modified']
-
-    # make the request
-    upstreamRequest = HTTP.request(r)
 
 
 Proxy::_appComplete = (request, response) ->
