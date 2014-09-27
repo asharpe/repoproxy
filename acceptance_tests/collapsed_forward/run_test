@@ -6,7 +6,6 @@ rm -rf -- *.tmp temp
 
 cleanup() {
 	kill $server_pid $repoproxy_pid > /dev/null 2>&1
-#	ls -l *.tmp
 	rm -rf -- *.tmp temp
 }
 trap cleanup SIGINT SIGTERM
@@ -25,23 +24,32 @@ for i in {0..5}; do
 done
 port=$(cat server_port.tmp)
 
+
 # start up a repoproxy
-../../repoproxy.js &
+[[ -n $debug_proxy || -n $debug ]] && {
+	../../repoproxy.js &
+} || {
+	../../repoproxy.js >/dev/null 2>&1 &
+}
 repoproxy_pid=$!
 sleep 1
+
 
 # Request the page x times
 check=$(
 	for i in $(eval echo {1..${1:-5}}); do
 		sleep 0.1
-		http_proxy="http://localhost:3142/" curl http://localhost:$port/the-right-url -so server_out_$i.tmp &
+		[[ -n $debug_client || -n $debug ]] && {
+			http_proxy="http://localhost:3142/" curl http://localhost:$port/the-right-url -vs | tee server_out_$i.tmp >&2 &
+		} || {
+			http_proxy="http://localhost:3142/" curl http://localhost:$port/the-right-url -so server_out_$i.tmp &
+		}
 		echo "a795a8af86483adc2fcd82f76ff9e0e1  server_out_$i.tmp"
 	done
 	wait
-	# let the server shutdown cleanly
-	sleep 0.5
 )
 
+#echo "$check"
 # check all the sums
 md5sum -c - <<< "$check"
 status=$?
@@ -49,3 +57,4 @@ status=$?
 cleanup
 
 exit $status
+
