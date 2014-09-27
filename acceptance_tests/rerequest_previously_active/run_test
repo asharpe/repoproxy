@@ -30,7 +30,7 @@ repoproxy_pid=$!
 sleep 1
 
 for i in {1..2}; do
-	http_proxy="http://localhost:3142/" wget http://localhost:$port/the-right-url -O server_out_$i.tmp
+	http_proxy="http://localhost:3142/" curl http://localhost:$port/the-right-url -so server_out_$i.tmp
 done
 
 # check all the sums

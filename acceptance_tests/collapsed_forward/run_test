@@ -40,7 +40,7 @@ check=$(
 	for i in $(eval echo {1..${1:-5}}); do
 		sleep 0.1
 		[[ -n $debug_client || -n $debug ]] && {
-			http_proxy="http://localhost:3142/" curl http://localhost:$port/the-right-url -vs | tee server_out_$i.tmp >&2 &
+			http_proxy="http://localhost:3142/" curl http://localhost:$port/the-right-url -vso server_out_$i.tmp >&2 &
 		} || {
 			http_proxy="http://localhost:3142/" curl http://localhost:$port/the-right-url -so server_out_$i.tmp &
 		}

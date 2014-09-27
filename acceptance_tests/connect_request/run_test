@@ -32,7 +32,7 @@ port=$(cat server_port.tmp)
 repoproxy_pid=$!
 sleep 1
 
-https_proxy="http://localhost:3142/" wget --no-check-certificate https://localhost:$port/the-right-url -O server_out.tmp
+http_proxy="http://localhost:3142/" https_proxy="http://localhost:3142/" curl -ks https://localhost:$port/the-right-url -o server_out.tmp
 
 # confirm it's ok
 diff ./server_out.tmp <(echo "/the-right-url")
