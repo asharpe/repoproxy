@@ -44,6 +44,28 @@ CacheFile::getPath = (type) ->
   type = "data" unless type
   @_cacheDir + "/" + type + "/" + @_file
 
+CacheFile::getLocalMeta = ->
+  path = @getPath("meta")
+  FS.isFile(path).then (isFile) ->
+    # we'll get the contents and the last modified, knowing that
+    # the proxy will update the last modified for any requests that
+    # don't come with an expiry (eg, etag, last-modified)
+    if isFile
+      Q.all([
+        FS.read path
+        FS.stat path
+      ]).then (data) ->
+        contents = data[0]
+        stat = data[1]
+        try
+          meta = JSON.parse(contents)
+          meta.mtime = stat.node.mtime
+          meta
+        catch e
+          return {}
+    else
+      Q()
+
 CacheFile::getMeta = ->
   path = @getPath("meta")
   FS.isFile(path).then (isFile) ->
@@ -117,6 +139,34 @@ CacheFile::save = (upstreamResponse) ->
       FS.move self.getPath("temp-meta"), self.getPath("meta")
   else
     do Q
+
+
+CacheFile::saveMetadata = (meta) ->
+  Q.all([
+    @makeTree("data")
+    @makeTree("meta")
+    @makeTree("temp-meta")
+  ]).then =>
+    FS.write @getPath("temp-meta"), JSON.stringify _.omit meta, [
+        'connection',
+        'keep-alive',
+        'accept-ranges',
+      ]
+  .then =>
+    Q.all [
+      FS.isFile(@getPath("data"))
+      FS.isFile(@getPath("meta"))
+    ]
+  .spread (dataExists, metaExists) =>
+    promises = []
+    promises.push FS.remove(@getPath("data")) if dataExists
+    promises.push FS.remove(@getPath("meta")) if metaExists
+    Q.all promises
+  .then =>
+    @_writer.move @getPath("data")
+  .then =>
+    @_writer = null
+    FS.move @getPath("temp-meta"), @getPath("meta")
 
 
 CacheFile::makeTree = (type) ->
@@ -218,7 +268,6 @@ CacheFile::getReader = (request) ->
     @getMeta()
   ]).spread (expired, meta) =>
     if expired
-      return @checkUpstream
       @getWriter().then (writer) =>
         writer.getReader()
     else

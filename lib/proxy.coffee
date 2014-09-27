@@ -47,7 +47,6 @@ Proxy::application = (request) ->
   @_cacher.getCacheFile(request.url)
     .then (cacheFile) =>
       if cacheFile
-        #request.log 'caching', request
         @_appCacheable request, cacheFile
 
       else
@@ -103,20 +102,42 @@ something that could be cached
 ###
 Proxy::_appCacheable = (request, cacheFile) ->
 
-  # if there's a request in progress ...
+  # if there's no request in progress, then this one is
   if not @_collapsible[request.url]
     @_collapsible[request.url] = new class
       cacheFile: cacheFile
       request: request
-      getResponse: () =>
-        return Q(@response) if @response
-        @gettingResponse ?= @_getResponse()
-      _getResponse: () =>
-        # check for metadata
-        @cacheFile.getMeta().then (meta) =>
+      _upstreamRequest: undefined
+      response: undefined
+      _meta: undefined
+
+      getMeta: (thisRequest) =>
+        #thisRequest.log 'getting metadata'
+        #return Q(@_meta) if @_meta
+        thisRequest.log 'getting metdata promise'
+        @gettingMeta ?= @_getMeta(thisRequest)
+
+      _getMeta: (thisRequest) =>
+        throw new Error('invalid metadata fetch attempt') if @request != thisRequest
+        @request.log 'checking local metdata'
+        @cacheFile.getLocalMeta().then (meta) =>
+          @request.log 'local metadata', meta
+          # if the metadata is still valid, return it
+          if (
+            meta and (
+              (meta?.expiry and (moment(meta?.expiry) > moment())) or
+              (not meta?.expiry and moment(meta?.mtime) > moment().subtract('minutes', 30))
+            )
+          )
+            @request.log 'metadata says not expired'
+            @getReader = ->
+              @cacheFile.getReader()
+            return meta
+
+          # otherwise we're requesting some new metadata from upstream
           # default request
           r =
-            url: request.url
+            url: @request.url
             headers: _.clone(@request.headers)
 
           # we'll try to send if-none-match or if-modified-since if we can
@@ -125,30 +146,96 @@ Proxy::_appCacheable = (request, cacheFile) ->
             r.headers['if-modified-since'] = meta['last-modified'] if meta['last-modified']
 
           # make the request
-          upstreamRequest = HTTP.request(r)
+          @request.log 'getting upstream metadata', r
+          @_upstreamRequest = HTTP.request(r)
+          @_upstreamRequest.then (response) =>
+            @request.log 'upstream response', response.status
+            meta = response.headers or {}
+            meta._status = response.status
+
+            if not meta.expiry and not (meta.etag or meta['last-modified'])
+              meta.expiry = moment().add('minutes', 30)
+
+            switch
+              when 304 == response.status # not modified
+                # collapsed requests can request a reader immediately, which should open the file
+                # and give it to them
+                @getReader = ->
+                  @cacheFile.getReader()
+                meta
+
+              when 300 < response.status < 400 # redirect
+                # we should do the redirect and pass the response to all requests
+                # TODO I think there might be some recursion here - need to think this out a bit more
+                #request.log "redirecting to " + upstreamResponse.headers.location
+                #@_appComplete request, Apps.redirect(request, upstreamResponse.headers.location, upstreamResponse.status)
+                # TODO these will fail for now
+                meta
+
+              else # actual response
+                deferredMeta = Q.defer()
+                deferredReader = Q.defer()
+                @getReader = ->
+                  deferredReader.promise
+
+                #@request.log 'getting writer for', @cacheFile
+                @cacheFile.getWriter().then (writer) =>
+                  # since we can only resolve the deferred once, that means there's a single
+                  # reader for that deferred which is likely a problem if multiple clients get
+                  # it - they each want their own reader
+                  # This has to work in combo with getMeta to ensure that subsequent requests wait
+                  # for their metadata until we can give them a new reader
+                  # HACK! this will make subsequent requests get a new reader
+                  @getReader = ->
+                    writer.getReader()
+
+                  # provide the metadata
+                  deferredMeta.resolve meta
+
+                  # give a reader to the first request - subsequent requests should be bocking on getMeta
+                  deferredReader.resolve writer.getReader()
+
+                  # write the response out
+                  @request.log 'writing response body'
+                  response.body.forEach (chunk) ->
+                    writer.write chunk
+                  .then ->
+                    writer.close()
+                    request.log 'finished writing cache file'
+                    #cacheFile.save(upstreamResponse)
+                    #  .fail (error)
+                    #    deferred.fail error
+
+                    # write the metadata last since new requests check for this first
+                    cacheFile.saveMetadata meta
+                .fail (error) =>
+                  @request.log 'failsauce', error
+                  error
+
+                # return metadata
+                #@request.log 'metadata', meta
+                #meta
+                deferredMeta.promise
+
       @
 
-  else
-    # we should collapse this request
-    return @_appCollapse request, @_collapsible[request.url]
+  # all requests are considered collapsed
+  _coll = @_collapsible[request.url]
+  #request.log 'requesting metadata'
 
-  # otherwise let's check the cached file ...
-  Q.all([
-    cacheFile.expired()
-    cacheFile.getMeta()
-  ]).spread (expired, meta) =>
-    # expired means that it has an expiry, or it's not been used in the last 30 minutes
-    if expired
-      return @_appCacheFromUpstream request, cacheFile
-
-    else
-      request.log "sending cached response"
-      cacheFile.getReader().then (reader) =>
-        @_appComplete request, cacheFile
-        response = Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
-        # TODO are we caching redirects?  I think we might be following them without caching further down
-        response.headers['location'] = meta['location'] if meta['location']
-        response
+  # first we'll get the metadata
+  _coll.getMeta(request).then (meta) =>
+    request.log 'got metadata, requesting reader', _coll.getReader.toString()
+    Q.all([
+      meta
+      _coll.getReader()
+    ])
+  # then the reader, and send a response
+  .spread (meta, reader) =>
+    response = Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
+    # TODO are we caching redirects?  I think we might be following them without caching further down
+    response.headers['location'] = meta['location'] if meta['location']
+    response
 
 
 ###
@@ -156,15 +243,16 @@ We're attaching to a cacheable request that is already being downloaded by
 another client
 ###
 Proxy::_appCollapse = (request, active) ->
-  cacheFile = active.cacheFile
   request.log "collapsing into {#{active.request.k}}"
-  Q.all(
-    Q.linearise([
-      active.getResponse()
-      active.cacheFile.getReader()
-    ])
-    active.cacheFile.getMeta()
-  ).spread (reader, meta) ->
+  Q.linearise([
+    active.getReader(request)
+    (reader) ->
+      [
+        reader
+        active.cacheFile.getMeta()
+      ]
+  ]).spread (reader, meta) ->
+    request.log 'returning collapsed response'
     Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
   .fail (error) ->
     request.log "#{error}"
@@ -173,6 +261,47 @@ Proxy::_appCollapse = (request, active) ->
       'text/plain'
       502 # gateway error - probably true
     )
+  .finally ->
+    request.log 'complete'
+
+
+  ###
+  active.getReader(request).then (reader) ->
+    active.cacheFile.getMeta().then (meta) ->
+    Q.all([
+      active.cacheFile.getMeta()
+      active.cacheFile.getReader()
+    ]).spread (reader, meta) ->
+      request.log 'returning collapsed response'
+      Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
+    .fail (error) ->
+      request.log "#{error}"
+      Apps.ok(
+        "#{error}" # just convert the error to string for now
+        'text/plain'
+        502 # gateway error - probably true
+      )
+    .finally ->
+      request.log 'complete'
+  ###
+  ###
+  Q.all([
+    Q.linearise([
+      active.getResponse(request)
+      active.cacheFile.getReader()
+    ])
+    active.cacheFile.getMeta()
+  ]).spread (reader, meta) ->
+    request.log 'returning collapsed response'
+    Apps.ok reader, meta?['content-type'] or 'text/plain', meta?._status or 200
+  .fail (error) ->
+    request.log "#{error}"
+    Apps.ok(
+      "#{error}" # just convert the error to string for now
+      'text/plain'
+      502 # gateway error - probably true
+    )
+  ###
 
   ###
   Q.all([cacheFile.getReader(), cacheFile.getMeta()]).then (res) ->
