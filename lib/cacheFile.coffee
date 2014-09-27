@@ -11,14 +11,16 @@ Create the cacheable file
 @param cacheDir - the directory containing all repository cache
 @param file - the file we want relative to the cacheDir
 ###
-CacheFile = (cacheDir, file) ->
+CacheFile = (cacheDir, url) ->
   @_cacheDir = cacheDir
-  @_file = file
+  @_url = url
+  @_file = url.host + url.path
   @_writer = null
 
 console = require('console')
 Q = require("q")
 FS = require("q-io/fs")
+HTTP = require("q-io/http")
 fs = require("fs")
 Reader = require("q-io/reader")
 Path = require("path")
@@ -27,6 +29,8 @@ util = require("util")
 Events = require("events")
 _ = require("underscore")
 ReadableFileWriter = require("./readableFileWriter")
+
+util.inherits CacheFile, Events.EventEmitter
 module.exports = CacheFile
 
 CacheFile::exists = ->
@@ -37,7 +41,7 @@ CacheFile::exists = ->
     res[0] and res[1]
 
 CacheFile::getPath = (type) ->
-  type = "data"  unless type
+  type = "data" unless type
   @_cacheDir + "/" + type + "/" + @_file
 
 CacheFile::getMeta = ->
@@ -180,13 +184,13 @@ The writer will send data to disk + any readers
 that are already attached or become attached
 ###
 CacheFile::getWriter = ->
-  
+
   # if we already have the writer return it
-  return Q(@_writer)  if @_writer
-  
+  return Q(@_writer) if @_writer
+
   # other wise if we haven't started getting it, start getting it
-  @_gettingWriter = @_getNewWriter()  unless @_gettingWriter
-  
+  @_gettingWriter ?= @_getNewWriter() # unless @_gettingWriter
+
   # return the promise for the new one
   @_gettingWriter
 
@@ -201,10 +205,47 @@ CacheFile::_getNewWriter = ->
   ).then (writer) ->
     self._writer = writer
 
+
 ###
 Get a stream reader
+
+This will check the state of the resource and either create a writer or return the resource
 ###
-CacheFile::getReader = ->
+CacheFile::getReader = (request) ->
+  ###
+  Q.all([
+    @expired()
+    @getMeta()
+  ]).spread (expired, meta) =>
+    if expired
+      return @checkUpstream
+      @getWriter().then (writer) =>
+        writer.getReader()
+    else
+      Q FS.open @getPath(),
+        flags: 'rb'
+  ###
   Q @_writer?.getReader() or FS.open @getPath(),
     flags: 'rb'
+
+
+###
+Check the state of the upstream resources
+
+There should only be one of these in progress at any time
+###
+CacheFile::checkUpstream = (request) ->
+  return Q(@_upstreamCheck) if @_upstreamCheck
+
+  @_upstreamCheck ?= @_checkUpstream request
+
+
+###
+Make a request upstream, possibly returning the full response
+###
+CacheFile::_checkUpstream = (request) ->
+  r =
+    url: @_url
+    headers: _.clone request.headers
+
 

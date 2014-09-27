@@ -4,11 +4,6 @@ Q = require('q')
 CacheFile = require('./cacheFile')
 FindIt = require('findit')
 
-Q.linearise = (promises) ->
-	result = Q.resolve()
-	result = result.then(f) for f in promises
-	result
-
 class Cleaner
 	constructor: (@opts) ->
 		@cacheDir = @opts.cacheDir

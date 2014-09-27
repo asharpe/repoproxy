@@ -39,6 +39,6 @@ function sendChunk(res) {
 	} else {
 		setTimeout(function() {
 			sendChunk(res);
-		}, 10);
+		}, 100);
 	}
 }

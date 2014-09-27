@@ -16,10 +16,9 @@ returns a promise with the CacheFile, it might resolve with
 undefined in which case it shouldn't be cached
 ###
 Cacher::getCacheFile = (url) ->
-  self = this
-  @getInfo(url).then (info) ->
+  @getInfo(url).then (info) =>
     if info and info.cache
-      new CacheFile(self._cacheDir, info.path)
+      new CacheFile @_cacheDir, info.url
     else
       Q()
 
@@ -34,13 +33,17 @@ cache: boolean
 Cacher::getInfo = (url) ->
   url = URL.parse(url)
   host = url.hostname
-  self = this
+
+  ###
   if _.some(@_hosts, (h) ->
     h is host
   )
+  ###
+  if true
     Q
+      url: url
       path: host + url.path
-      
+
       # out right reject stuff that's obviously a directory
       cache: not url.path.match(/\/$/)
   else

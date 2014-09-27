@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 require("coffee-script");
+require('./lib/q-extensions');
 var Proxy = require('./lib/proxy');
 var Cleaner = require('./lib/cleaner');
 var yaml = require('js-yaml');
