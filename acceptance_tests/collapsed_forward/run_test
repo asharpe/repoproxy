@@ -34,7 +34,6 @@ sleep 1
 check=$(
 	for i in $(eval echo {1..${1:-5}}); do
 		sleep 0.1
-		#http_proxy="http://localhost:3142/" wget http://localhost:$port/the-right-url -O server_out_$i.tmp &
 		http_proxy="http://localhost:3142/" curl http://localhost:$port/the-right-url -so server_out_$i.tmp &
 		echo "a795a8af86483adc2fcd82f76ff9e0e1  server_out_$i.tmp"
 	done
