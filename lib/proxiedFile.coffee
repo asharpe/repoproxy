@@ -39,6 +39,7 @@ ProxiedFile::_getMeta = (thisRequest) ->
     )
       @request.debug 'metadata says not expired'
       @getReader = =>
+        thisRequest.log 'not expired, serving cached file'
         @cacheFile.getReader()
       return meta
 
@@ -55,10 +56,13 @@ ProxiedFile::_getMeta = (thisRequest) ->
 
     # make the request
     @request.debug 'getting upstream metadata', r
-    HTTP.request(r).then @_processUpstreamMetadata.bind @
+    Q.all([
+      thisRequest
+      HTTP.request(r)
+    ]).spread @_processUpstreamMetadata.bind @
 
 
-ProxiedFile::_processUpstreamMetadata = (response) ->
+ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
   @request.debug 'upstream response', response.status
   @_meta = response.headers or {}
   meta = @_meta
@@ -72,6 +76,7 @@ ProxiedFile::_processUpstreamMetadata = (response) ->
       # collapsed requests can request a reader immediately, which should open the file
       # and give it to them
       @getReader = =>
+        thisRequest.log 'not modified, serving cached file'
         @cacheFile.getReader()
       meta
 
@@ -98,6 +103,7 @@ ProxiedFile::_processUpstreamMetadata = (response) ->
         # for their metadata until we can give them a new reader
         # HACK! this will make subsequent requests get a new reader
         @getReader = ->
+          thisRequest.log 'serving upstream file'
           writer.getReader()
 
         # provide the metadata
