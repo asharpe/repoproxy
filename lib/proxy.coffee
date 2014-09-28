@@ -106,25 +106,12 @@ Proxy::_appCacheable = (currentRequest, cacheFile) ->
   # all requests are considered collapsed
   request = @_collapsible[currentRequest.url]
 
-  ###
-  # TODO my understanding of linearise doesn't work :(
-  Q.linearise([
-    # get metadata first
-    request.getMetadata(currentRequest)
-    # then the reader
-    (meta) ->
-      console.log meta, request.getReader
-      Q.all [meta, request.getReader()]
-  ])
-  ###
-  # first we'll get the metadata
-  request.getMetadata(currentRequest).then (meta) =>
+  # get metadata first
+  request.getMetadata(currentRequest).then (meta) ->
     currentRequest.debug 'got metadata, requesting reader', request.getReader.toString()
-    Q.all([
-      meta
-      request.getReader()
-    ])
-  .spread (meta, reader) =>
+    # then the reader
+    [meta, request.getReader()]
+  .spread (meta, reader) ->
     # then send a response
     response = Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
     # TODO are we caching redirects?  I think we might be following them without caching further down
@@ -132,6 +119,9 @@ Proxy::_appCacheable = (currentRequest, cacheFile) ->
     response
 
 
+###
+A request is finished, so we don't want to collapse any future requests
+###
 Proxy::_appComplete = (request, response) ->
   delete @_collapsible[request.url]
   request.debug 'no longer collapsible'
