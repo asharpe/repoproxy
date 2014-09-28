@@ -25,11 +25,7 @@ done
 port=$(cat server_port.tmp)
 
 # start up a repoproxy
-[[ -n $debug || -n $debug_proxy ]] && {
-	../../repoproxy.js &
-} || {
-	../../repoproxy.js >&/dev/null &
-}
+../../repoproxy.js &
 repoproxy_pid=$!
 sleep 1
 
