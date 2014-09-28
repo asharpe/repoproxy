@@ -31,7 +31,7 @@ ProxiedFile::_getMeta = (thisRequest) ->
   # sanity check - only the first request should get here
   throw new Error('invalid metadata fetch attempt') if @request != thisRequest
 
-  @cacheFile.getLocalMeta().then (meta) =>
+  @cacheFile.getMeta().then (meta) =>
     @request.debug 'local metadata', meta
     # if the metadata is still valid, return it
     if (
