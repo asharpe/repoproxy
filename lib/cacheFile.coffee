@@ -40,9 +40,10 @@ CacheFile::exists = ->
   ]).then (res) ->
     res[0] and res[1]
 
+
 CacheFile::getPath = (type) ->
-  type = "data" unless type
-  @_cacheDir + "/" + type + "/" + @_file
+  type ?= 'data'
+  @_cacheDir + '/' + type + '/' + @_file
 
 
 ###
@@ -89,9 +90,10 @@ Write the metadata to disk
 CacheFile::saveMetadata = (meta) ->
   @makeTree("meta").then =>
     FS.write @getPath("meta"), JSON.stringify _.omit meta, [
-        'connection',
-        'keep-alive',
-        'accept-ranges',
+        'connection'
+        'keep-alive'
+        'accept-ranges'
+        'mtime' # we added this ourselves, let's not store it as well
       ]
 
 

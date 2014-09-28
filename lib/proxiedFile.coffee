@@ -19,8 +19,10 @@ console = require('console')
 
 module.exports = ProxiedFile
 
+
 ProxiedFile::getMetadata = (thisRequest) ->
   @gettingMeta ?= @_getMeta(thisRequest)
+
 
 ProxiedFile::_getMeta = (thisRequest) ->
   # sanity check - only the first request should get here
@@ -121,5 +123,4 @@ ProxiedFile::_processUpstreamMetadata = (response) ->
         error
 
       deferredMeta.promise
-
 
