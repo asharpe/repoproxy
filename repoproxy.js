@@ -6,6 +6,7 @@ var Proxy = require('./lib/proxy');
 var Cleaner = require('./lib/cleaner');
 var yaml = require('js-yaml');
 var fs = require('fs');
+var moment = require('moment');
 
 var config = yaml.load(
 	fs.readFileSync('./config.yaml', "utf-8")
@@ -23,11 +24,16 @@ proxy.listen();
 var cleaner = new Cleaner(config);
 function cleanAndQueue() {
 	console.log("Cleaning");
-	cleaner.clean().then(function() {
-		console.log("Clean completed");
+	cleaner.clean().then(function(infos) {
+		console.log(moment().format(), "Clean completed");
+		console.log(infos.count, 'expired files');
+		console.log(infos.invalid, 'invalid files');
 		setTimeout(function() {
 			cleanAndQueue();
 		}, (config.cleanInterval || 30)*60*1000);
+	})
+	.fail(function(error) {
+		console.log('error while cleaning', error);
 	});
 }
 cleanAndQueue();

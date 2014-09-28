@@ -140,7 +140,7 @@ CacheFile::purge = ->
   Q.all([
     FS.isFile(@getPath("data"))
     FS.isFile(@getPath("meta"))
-  ]).spread (dataExists, metaExists) ->
+  ]).spread (dataExists, metaExists) =>
     proms = []
     proms.push FS.remove(@getPath("data")) if dataExists
     proms.push FS.remove(@getPath("meta")) if metaExists
