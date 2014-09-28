@@ -142,36 +142,17 @@ CacheFile::save = (upstreamResponse) ->
 
 
 CacheFile::saveMetadata = (meta) ->
-  Q.all([
-    @makeTree("data")
-    @makeTree("meta")
-    @makeTree("temp-meta")
-  ]).then =>
-    FS.write @getPath("temp-meta"), JSON.stringify _.omit meta, [
+  @makeTree("meta").then =>
+    FS.write @getPath("meta"), JSON.stringify _.omit meta, [
         'connection',
         'keep-alive',
         'accept-ranges',
       ]
-  .then =>
-    Q.all [
-      FS.isFile(@getPath("data"))
-      FS.isFile(@getPath("meta"))
-    ]
-  .spread (dataExists, metaExists) =>
-    promises = []
-    promises.push FS.remove(@getPath("data")) if dataExists
-    promises.push FS.remove(@getPath("meta")) if metaExists
-    Q.all promises
-  .then =>
-    @_writer.move @getPath("data")
-  .then =>
-    @_writer = null
-    FS.move @getPath("temp-meta"), @getPath("meta")
 
 
 CacheFile::makeTree = (type) ->
-  type = "data" unless type
-  dir = Path.dirname(@getPath(type))
+  #type = "data" unless type
+  dir = Path.dirname @getPath(type or 'data')
   FS.makeTree dir
 
 
@@ -247,6 +228,24 @@ CacheFile::getWriter = ->
 
 ###
 Ensure there's only one writer per cachefile
+
+This relies on the OS feature that currently open file
+descriptors retain their reference to the original file
+even if it's unlinked from the filesystem.
+
+This allows us to delete the old file and write a new one
+without disrupting existing requests reading the file
+###
+CacheFile::_getNewWriter = ->
+  FS.isFile(@getPath 'data').then (dataExists) =>
+    if dataExists then FS.remove(@getPath 'data') else Q()
+  .then =>
+    @makeTree("data")
+  .then =>
+    ReadableFileWriter.create @getPath("data")
+  .then (writer) =>
+    @_writer = writer
+
 ###
 CacheFile::_getNewWriter = ->
   self = this
@@ -254,7 +253,7 @@ CacheFile::_getNewWriter = ->
     ReadableFileWriter.create self.getPath("temp-data")
   ).then (writer) ->
     self._writer = writer
-
+###
 
 ###
 Get a stream reader
