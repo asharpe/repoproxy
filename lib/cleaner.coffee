@@ -21,7 +21,7 @@ class Cleaner
 
 	clean: ->
 		FS.isDirectory(@dataDir).then (isDir) =>
-			@cleanDataDir() if isDir
+			if isDir then @cleanDataDir() else {}
 
 
 	cleanDataDir: ->

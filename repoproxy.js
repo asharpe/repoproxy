@@ -24,10 +24,10 @@ proxy.listen();
 var cleaner = new Cleaner(config);
 function cleanAndQueue() {
 	console.log("Cleaning");
-	cleaner.clean().then(function(infos) {
-		console.log(moment().format(), "Clean completed");
-		console.log(infos.count, 'expired files');
-		console.log(infos.invalid, 'invalid files');
+	cleaner.clean().then(function(cleaned) {
+		console.log("Clean completed at", moment().format());
+		if (cleaned.count) console.log(cleaned.count, 'expired files');
+		if (cleaned.invalid) console.log(cleaned.invalid, 'invalid files');
 		setTimeout(function() {
 			cleanAndQueue();
 		}, (config.cleanInterval || 30)*60*1000);
