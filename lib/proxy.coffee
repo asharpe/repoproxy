@@ -13,7 +13,6 @@ Q = require("q")
 Q.longStackSupport = true
 HTTP = require("q-io/http")
 Apps = require("q-io/http-apps")
-Reader = require("q-io/reader")
 util = require("util")
 Events = require("events")
 net = require("net")

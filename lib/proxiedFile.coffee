@@ -13,15 +13,10 @@ Q = require("q")
 #Q.longStackSupport = true
 HTTP = require("q-io/http")
 Apps = require("q-io/http-apps")
-util = require("util")
-#Events = require("events")
-#net = require("net")
 _ = require("underscore")
-#Cacher = require("./cacher")
 moment = require('moment')
 console = require('console')
 
-#util.inherits Proxy, Events.EventEmitter
 module.exports = ProxiedFile
 
 ProxiedFile::getMetadata = (thisRequest) ->

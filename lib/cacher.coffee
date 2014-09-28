@@ -1,13 +1,15 @@
 Cacher = (opts) ->
   @_cacheDir = opts.cacheDir
   @_hosts = opts.hosts or []
-  this
+  @
 
 Q = require("q")
 CacheFile = require("./cacheFile")
 _ = require("underscore")
 URL = require("url")
+
 module.exports = Cacher
+
 
 ###
 Get the cache path for a given URL
@@ -21,6 +23,7 @@ Cacher::getCacheFile = (url) ->
       new CacheFile @_cacheDir, info.url
     else
       Q()
+
 
 ###
 Get cache info for a given url
@@ -48,3 +51,4 @@ Cacher::getInfo = (url) ->
       cache: not url.path.match(/\/$/)
   else
     Q()
+
