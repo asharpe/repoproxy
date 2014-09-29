@@ -40,7 +40,7 @@ check=$(
 		http_proxy="http://localhost:3142/" curl ${header:+-H "$header"} http://localhost:$port/the-right-url -so server_out_$i.tmp
 		echo "a795a8af86483adc2fcd82f76ff9e0e1  server_out_$i.tmp"
 		((++i))
-		sleep 1 # avoid collapsing
+		sleep 0.5 # avoid collapsing
 	done
 )
 

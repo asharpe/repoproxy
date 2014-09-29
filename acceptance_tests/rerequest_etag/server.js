@@ -7,21 +7,22 @@ var http = require('http');
 var _s = require('underscore.string');
 var fs = require('fs');
 var firstRequest = true;
+var etag = '"test-etag"';
 
 var server = http.createServer(function (req, res) {
-	if (req.headers['if-none-match'] == '"test-etag"') {
+	if (firstRequest) {
+		firstRequest = false;
+		res.writeHead(200, {
+			'Content-Type': 'text/plain',
+			'ETag': etag
+		});
+		sendChunk(res);
+	}
+	else if (req.headers['if-none-match'] == etag) {
 		res.writeHead(302, {});
 		res.end();
 // success, shut it down
 		server.close();
-	}
-	else if (firstRequest) {
-		firstRequest = false;
-		res.writeHead(200, {
-			'Content-Type': 'text/plain',
-			'ETag': '"test-etag"'
-		});
-		sendChunk(res);
 	}
 	else {
 		res.writeHead(404, {'Content-Type': 'text/plain'});
@@ -47,10 +48,5 @@ function sendChunk(res) {
 		res.end();
 	} else {
 		sendChunk(res);
-/*
-		setTimeout(function() {
-			sendChunk(res);
-		}, 10);
-*/
 	}
 }
