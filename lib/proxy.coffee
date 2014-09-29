@@ -108,6 +108,7 @@ Proxy::_appCacheable = (currentRequest, cacheFile, response) ->
     currentRequest.k += ':' + @_collapsible[currentRequest.url].request.k
     # handle the case when this request is the last to finish
     response.node.on 'finish', (error, value) =>
+      currentRequest.log 'finished'
       @_appComplete currentRequest
 
 
@@ -132,8 +133,6 @@ Proxy::_appCacheable = (currentRequest, cacheFile, response) ->
 A request is finished, so we don't want to collapse any future requests
 ###
 Proxy::_appComplete = (request) ->
-  # TODO seeing some double "finished" for a single request
-  request.log 'finished'
   if --@_collapsible[request.url]?.clients == 0
     @_collapsible[request.url].request.log 'no longer collapsible'
     delete @_collapsible[request.url] if @_collapsible[request.url]
