@@ -101,45 +101,38 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
       thisRequest.log 'serving upstream file'
       meta._status = response.status
       deferredMeta = Q.defer()
-      deferredReader = Q.defer()
-      @getReader = ->
-        deferredReader.promise
 
       @request.debug 'getting writer for', @cacheFile
       @cacheFile.getWriter().then (writer) =>
-        # since we can only resolve the deferred once, that means there's a single
-        # reader for that deferred which is likely a problem if multiple clients get
-        # it - they each want their own reader
-        # This has to work in combo with getMeta to ensure that subsequent requests wait
-        # for their metadata until we can give them a new reader
-        # HACK! this will make subsequent requests get a new reader
+        # this makes all collapsed requests get a new reader
+        # since only the one request makes it here we can't log in this method
         @getReader = ->
-          # TODO this is broken and reports this message from the main process for all collapsed
-          # requests since subsequent requests were given the promise for this info
           #thisRequest.log 'serving upstream file'
           writer.getReader()
 
         # provide the metadata
+        # NOTE this MUST be resolved after the reader has been made available
         deferredMeta.resolve meta
 
-        # give a reader to the first request - subsequent requests should be bocking on getMeta
-        deferredReader.resolve writer.getReader()
-
-        # write the response out
         @request.debug 'writing response body'
-        response.body.forEach (chunk) ->
-          writer.write chunk
-        .then =>
-          writer.close()
-          @request.debug 'finished writing cache file'
-
-          # write the metadata last since new requests check for this first
+        Q.all([
+          # we're safe to write the metadata now since any concurrent requests will be collapsed
+          # until we call @complete, and if we ensure that the metadata is written before then
+          # we can be sure all subsequent requests will have everything available
           @cacheFile.saveMetadata(meta).then =>
             @request.debug 'finished writing metdata'
 
-            # and let the app know we're done
-            @complete @request
-            response
+          response.body.forEach (chunk) ->
+            writer.write chunk
+        ]).then =>
+          writer.close()
+          @request.debug 'finished writing cache file'
+
+          # and let the app know we're done (stop collapsing)
+          @complete @request
+
+          #response
+
       .fail (error) =>
         @request.log 'failsauce', error
         error
