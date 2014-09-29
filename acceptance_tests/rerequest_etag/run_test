@@ -1,0 +1,53 @@
+#!/bin/bash
+
+cd "$(dirname "$0")"
+
+rm -rf -- *.tmp temp
+
+cleanup() {
+	kill $server_pid $repoproxy_pid > /dev/null 2>&1
+	rm -rf -- *.tmp temp
+}
+trap cleanup SIGINT SIGTERM
+
+# start up a server, first request will serve an e-tag
+# subsequent request MUST have a correct if-none-match
+./server.js &
+server_pid=$!
+
+# find the port the server is listening on
+for i in {0..5}; do
+	if [[ -f server_port.tmp ]]; then
+		break;
+	fi
+	sleep 0.5
+done
+port=$(cat server_port.tmp)
+
+# start up a repoproxy
+../../repoproxy.js &
+repoproxy_pid=$!
+sleep 1
+
+headers=(
+	""
+	'If-None-Match: "test-etag"'
+)
+let i=1
+
+check=$(
+	for header in "${headers[@]}"; do
+		http_proxy="http://localhost:3142/" curl ${header:+-H "$header"} http://localhost:$port/the-right-url -so server_out_$i.tmp
+		echo "a795a8af86483adc2fcd82f76ff9e0e1  server_out_$i.tmp"
+		((++i))
+		sleep 1 # avoid collapsing
+	done
+)
+
+# check all the sums
+md5sum -c - <<< "$check"
+status=$?
+
+cleanup
+
+exit $status
