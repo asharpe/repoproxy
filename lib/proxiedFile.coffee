@@ -1,10 +1,8 @@
 ProxiedFile = (request, cacheFile, complete) ->
   @request = request
   @cacheFile = cacheFile
-  @response = undefined
-  @_meta = undefined
-  @getReader = undefined
   @complete = complete
+  @getReader = undefined
   @clients = 1
   @
 
@@ -19,14 +17,24 @@ console = require('console')
 module.exports = ProxiedFile
 
 
+###
+Return a promise for the metadata
+
+This method ensures only one request calls @_getMeta
+###
 ProxiedFile::getMetadata = (thisRequest) ->
   @gettingMeta ?= @_getMeta(thisRequest)
 
 
+###
+Check the local metadata and request it from upstream if needed
+###
 ProxiedFile::_getMeta = (thisRequest) ->
   # sanity check - only the first request should get here
+  # TODO not sure we can guarantee this, so we may need to remove it
   throw new Error('invalid metadata fetch attempt') if @request != thisRequest
 
+  # check the local metdata
   @cacheFile.getMeta().then (meta) =>
     @request.debug 'local metadata', meta
     # if the metadata is still valid, return it
@@ -36,14 +44,21 @@ ProxiedFile::_getMeta = (thisRequest) ->
         (not meta?.expiry and moment(meta?.mtime) > moment().subtract('minutes', 30))
       )
     )
-      @request.debug 'metadata says not expired'
+      @request.debug 'metadata says not expired. mtime:', meta.mtime, ', expiry:', meta.expiry?
+
       @getReader = =>
-        thisRequest.log 'not expired, serving cached file'
+        @request.log 'not expired, serving cached file'
         @cacheFile.getReader()
+
+      # we need to "complete" this request else we'll have indefinite collapsing
+      @complete @request
+
+      # TODO to keep the logging consistent we should listen for the 'finished' event on the
+      # node response object for this request
+
       return meta
 
-    # otherwise we're requesting some new metadata from upstream
-    # default request
+    # otherwise we're requesting new metadata from upstream
     r =
       url: @request.url
       headers: _.clone(@request.headers)
@@ -53,18 +68,18 @@ ProxiedFile::_getMeta = (thisRequest) ->
       r.headers['if-none-match'] = meta.etag if meta.etag
       r.headers['if-modified-since'] = meta['last-modified'] if meta['last-modified']
 
-    # make the request
     @request.debug 'getting upstream metadata', r
     Q.all([
-      thisRequest
       HTTP.request(r)
     ]).spread @_processUpstreamMetadata.bind @
 
 
-ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
+###
+Decide how to provide collapsed readers depending on the upstream response
+###
+ProxiedFile::_processUpstreamMetadata = (response) ->
   @request.debug 'upstream response', response.status
-  @_meta = response.headers or {}
-  meta = @_meta
+  meta = response.headers or {}
 
   if not meta.expiry and not (meta.etag or meta['last-modified'])
     meta.expiry = moment().add('minutes', 30)
@@ -74,7 +89,7 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
       # collapsed requests can request a reader immediately, which should open the file
       # and give it to them
       @getReader = =>
-        thisRequest.log 'not modified, serving cached file'
+        #thisRequest.log 'not modified, serving cached file'
         @cacheFile.getReader()
 
       # mark this file as fresh
@@ -98,7 +113,7 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
       meta
 
     else # actual response
-      thisRequest.log 'serving upstream file'
+      @request.log 'serving upstream file'
       meta._status = response.status
       deferredMeta = Q.defer()
 
@@ -129,9 +144,8 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
           @request.debug 'finished writing cache file'
 
           # and let the app know we're done (stop collapsing)
+          @request.log 'finished'
           @complete @request
-
-          #response
 
       .fail (error) =>
         @request.log 'failsauce', error
