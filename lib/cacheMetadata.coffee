@@ -1,4 +1,4 @@
-ProxiedFile = (request, cacheFile, complete) ->
+CacheMetadata = (request, cacheFile, complete) ->
   @request = request
   @cacheFile = cacheFile
   @complete = complete
@@ -14,7 +14,7 @@ _ = require("underscore")
 moment = require('moment')
 console = require('console')
 
-module.exports = ProxiedFile
+module.exports = CacheMetadata
 
 
 ###
@@ -22,14 +22,14 @@ Return a promise for the metadata
 
 This method ensures only one request calls @_getMeta
 ###
-ProxiedFile::getMetadata = (thisRequest) ->
+CacheMetadata::getMetadata = (thisRequest) ->
   @gettingMeta ?= @_getMeta(thisRequest)
 
 
 ###
 Check the local metadata and request it from upstream if needed
 ###
-ProxiedFile::_getMeta = (thisRequest) ->
+CacheMetadata::_getMeta = (thisRequest) ->
   # sanity check - only the first request should get here
   # TODO not sure we can guarantee this, so we may need to remove it
   throw new Error('invalid metadata fetch attempt') if @request != thisRequest
@@ -77,7 +77,7 @@ ProxiedFile::_getMeta = (thisRequest) ->
 ###
 Decide how to provide collapsed readers depending on the upstream response
 ###
-ProxiedFile::_processUpstreamMetadata = (response) ->
+CacheMetadata::_processUpstreamMetadata = (response) ->
   @request.debug 'upstream response', response.status
   meta = response.headers or {}
 

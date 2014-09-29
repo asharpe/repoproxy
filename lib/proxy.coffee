@@ -18,7 +18,7 @@ Events = require("events")
 net = require("net")
 _ = require("underscore")
 Cacher = require("./cacher")
-ProxiedFile = require("./proxiedFile")
+CacheMetadata = require("./cacheMetadata")
 moment = require('moment')
 
 util.inherits Proxy, Events.EventEmitter
@@ -98,7 +98,7 @@ something that could be cached
 Proxy::_appCacheable = (currentRequest, cacheFile, response) ->
   # if there's no request in progress, then this one is
   if not @_collapsible[currentRequest.url]
-    @_collapsible[currentRequest.url] = new ProxiedFile currentRequest, cacheFile, =>
+    @_collapsible[currentRequest.url] = new CacheMetadata currentRequest, cacheFile, =>
       # this will get called after the metadata is saved
       @_appComplete currentRequest
   else
