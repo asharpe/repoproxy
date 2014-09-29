@@ -102,7 +102,10 @@ Proxy::_appCacheable = (currentRequest, cacheFile, response) ->
       # this will get called after the metadata is saved
       @_appComplete currentRequest
   else
-    currentRequest.log "collapsing into {#{@_collapsible[currentRequest.url].request.k}:#{@_collapsible[currentRequest.url].clients++}}"
+    @_collapsible[currentRequest.url].clients++
+    currentRequest.log "collapsed into {#{@_collapsible[currentRequest.url].request.k}}"
+    # update our index to show we've been collapsed
+    currentRequest.k += ':' + @_collapsible[currentRequest.url].request.k
     # handle the case when this request is the last to finish
     response.node.on 'finish', (error, value) =>
       @_appComplete currentRequest
@@ -111,7 +114,8 @@ Proxy::_appCacheable = (currentRequest, cacheFile, response) ->
   # all requests are considered collapsed
   request = @_collapsible[currentRequest.url]
 
-  # get metadata first
+  # the retrieval of metadata sets up what kind of reader we get, so get
+  # metadata first
   request.getMetadata(currentRequest).then (meta) ->
     currentRequest.debug 'got metadata, requesting reader', request.getReader.toString()
     # then the reader
