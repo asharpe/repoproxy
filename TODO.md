@@ -6,9 +6,6 @@
   * init scripts
   * logrotate snippet
   * sensible logging
- * Header passthrough
- * Freshness Validation
-  * Last-Modified -> If-Modified-Since
-  * Etag -> If-None-Match
  * Pragma and Cache-Control
  * deduplication
+ * put CacheMetadata behind the Cacher
