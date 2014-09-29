@@ -1,0 +1,47 @@
+#!/bin/bash
+
+cd "$(dirname "$0")"
+
+rm -rf -- *.tmp temp
+
+cleanup() {
+	kill $server_pid $repoproxy_pid > /dev/null 2>&1
+	rm -rf -- *.tmp temp
+}
+trap cleanup SIGINT SIGTERM
+
+limit=${1-5}
+
+# start up a server, it'll just spam back "foofoofoofoo..."
+# for exactly $limit requests
+./server.js $limit &
+server_pid=$!
+
+# find the port the server is listening on
+for i in {0..5}; do
+	if [[ -f server_port.tmp ]]; then
+		break;
+	fi
+	sleep 0.5
+done
+port=$(cat server_port.tmp)
+
+# start up a repoproxy
+../../repoproxy.js &
+repoproxy_pid=$!
+sleep 1
+
+check=$(
+	for i in $(eval echo {1..${limit}}); do
+		http_proxy="http://localhost:3142/" curl http://localhost:$port/the-right-url -so server_out_$i.tmp
+		echo "a795a8af86483adc2fcd82f76ff9e0e1  server_out_$i.tmp"
+	done
+)
+
+# check all the sums
+md5sum -c - <<< "$check"
+status=$?
+
+cleanup
+
+exit $status
