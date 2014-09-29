@@ -128,9 +128,10 @@ Proxy::_appCacheable = (currentRequest, cacheFile, response) ->
 A request is finished, so we don't want to collapse any future requests
 ###
 Proxy::_appComplete = (request) ->
+  # TODO seeing some double "finished" for a single request
   request.log 'finished'
-  if --@_collapsible[request.url].clients == 0
-    @_collapsible[request.url].request.debug 'no longer collapsible'
+  if --@_collapsible[request.url]?.clients == 0
+    @_collapsible[request.url].request.log 'no longer collapsible'
     delete @_collapsible[request.url] if @_collapsible[request.url]
 
 
