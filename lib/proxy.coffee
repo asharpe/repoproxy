@@ -31,7 +31,7 @@ The q-io/http application function
 This is the entry point in to the proxy, a request comes in,
 a response goes out.
 ###
-Proxy::application = (request) ->
+Proxy::application = (request, response) ->
   @normaliseRequest request
 
   request.k = @_counter++
@@ -45,7 +45,7 @@ Proxy::application = (request) ->
   @_cacher.getCacheFile(request.url)
     .then (cacheFile) =>
       if cacheFile
-        @_appCacheable request, cacheFile
+        @_appCacheable request, cacheFile, response
 
       else
         # not cacheable, just silently proxy
@@ -95,12 +95,18 @@ Proxy::connectProxy = (res, socket, bodyHead) ->
 The application to respond with if the request corresponds to
 something that could be cached
 ###
-Proxy::_appCacheable = (currentRequest, cacheFile) ->
+Proxy::_appCacheable = (currentRequest, cacheFile, response) ->
   # if there's no request in progress, then this one is
   if not @_collapsible[currentRequest.url]
-    @_collapsible[currentRequest.url] = new ProxiedFile(currentRequest, cacheFile, @_appComplete.bind @)
+    @_collapsible[currentRequest.url] = new ProxiedFile currentRequest, cacheFile, =>
+      # this will get called after the metadata is saved
+      @_appComplete currentRequest
   else
-    currentRequest.log "collapsing into {#{@_collapsible[currentRequest.url].request.k}}"
+    currentRequest.log "collapsing into {#{@_collapsible[currentRequest.url].request.k}:#{@_collapsible[currentRequest.url].clients++}}"
+    # handle the case when this request is the last to finish
+    response.node.on 'finish', (error, value) =>
+      @_appComplete currentRequest
+
 
   # all requests are considered collapsed
   request = @_collapsible[currentRequest.url]
@@ -121,10 +127,11 @@ Proxy::_appCacheable = (currentRequest, cacheFile) ->
 ###
 A request is finished, so we don't want to collapse any future requests
 ###
-Proxy::_appComplete = (request, response) ->
-  delete @_collapsible[request.url]
-  request.debug 'no longer collapsible'
-  response
+Proxy::_appComplete = (request) ->
+  request.log 'finished'
+  if --@_collapsible[request.url].clients == 0
+    @_collapsible[request.url].request.debug 'no longer collapsible'
+    delete @_collapsible[request.url] if @_collapsible[request.url]
 
 
 ###

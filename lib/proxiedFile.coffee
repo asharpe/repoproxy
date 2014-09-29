@@ -1,12 +1,11 @@
 ProxiedFile = (request, cacheFile, complete) ->
   @request = request
   @cacheFile = cacheFile
-  #@meta = undefined
-  #@_upstreamRequest = undefined
   @response = undefined
   @_meta = undefined
   @getReader = undefined
   @complete = complete
+  @clients = 1
   @
 
 Q = require("q")
@@ -66,7 +65,6 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
   @request.debug 'upstream response', response.status
   @_meta = response.headers or {}
   meta = @_meta
-  meta._status = response.status
 
   if not meta.expiry and not (meta.etag or meta['last-modified'])
     meta.expiry = moment().add('minutes', 30)
@@ -78,6 +76,10 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
       @getReader = =>
         thisRequest.log 'not modified, serving cached file'
         @cacheFile.getReader()
+
+      # mark this file as fresh
+      @cacheFile.markUpdated()
+
       meta
 
     when 300 < response.status < 400 # redirect
@@ -89,6 +91,8 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
       meta
 
     else # actual response
+      thisRequest.log 'serving upstream file'
+      meta._status = response.status
       deferredMeta = Q.defer()
       deferredReader = Q.defer()
       @getReader = ->
@@ -103,7 +107,9 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
         # for their metadata until we can give them a new reader
         # HACK! this will make subsequent requests get a new reader
         @getReader = ->
-          thisRequest.log 'serving upstream file'
+          # TODO this is broken and reports this message from the main process for all collapsed
+          # requests
+          #thisRequest.log 'serving upstream file'
           writer.getReader()
 
         # provide the metadata
@@ -122,8 +128,11 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
 
           # write the metadata last since new requests check for this first
           @cacheFile.saveMetadata(meta).then =>
+            @request.debug 'finished writing metdata'
+
             # and let the app know we're done
-            @complete @request, response
+            @complete @request
+            response
       .fail (error) =>
         @request.log 'failsauce', error
         error
