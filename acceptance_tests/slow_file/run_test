@@ -63,6 +63,7 @@ cleanTemp().then ->
 	console.log("Completed at #{finished}ms")
 	contentOk = !(content.match(/^((foo){341}\n){100}$/) is null)
 	console.log("Content ok: #{contentOk}")
+	# TODO why do we need a threshold for finished?
 	ok = first < 200 && finished < 1500 && contentOk
 .finally ->
 	proxy.proc.kill('SIGTERM')
