@@ -80,6 +80,9 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
       # mark this file as fresh
       @cacheFile.markUpdated()
 
+      # let the app know we're done
+      @complete @request
+
       meta
 
     when 300 < response.status < 400 # redirect
@@ -87,6 +90,10 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
       # TODO I think there might be some recursion here - need to think this out a bit more
       #request.log "redirecting to " + upstreamResponse.headers.location
       #@_appComplete request, Apps.redirect(request, upstreamResponse.headers.location, upstreamResponse.status)
+
+      # let the app know we're done
+      @complete @request
+
       # TODO these will fail for now
       meta
 
@@ -108,7 +115,7 @@ ProxiedFile::_processUpstreamMetadata = (thisRequest, response) ->
         # HACK! this will make subsequent requests get a new reader
         @getReader = ->
           # TODO this is broken and reports this message from the main process for all collapsed
-          # requests
+          # requests since subsequent requests were given the promise for this info
           #thisRequest.log 'serving upstream file'
           writer.getReader()
 
