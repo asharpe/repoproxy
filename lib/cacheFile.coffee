@@ -122,16 +122,20 @@ Extra checks for files with etag or last-modified
 ###
 CacheFile::expiredForCleaner = ->
   Q.all([
-    @expired
-    @getMeta
+    @expired()
+    @getMeta()
   ]).spread (expired, meta) ->
     # simple case
+    # either it has an expiry that is in the future, or it's been
+    # touched in the last 30 minutes
     return false if not expired
 
+    # at this point it's expired for some reason...
     # if it was expired because it owns an expiry, that's valid
     return true if meta.expiry
 
-    # we'll keep other things for a while longer
+    # we'll keep other things for a while longer, these are etag and
+    # last-modified resources
     moment(meta.mtime) < moment().subtract('months', 9)
 
 

@@ -83,8 +83,9 @@ class Cleaner
 
 			if not metadata
 				@debug 'no metdata for', file
+				# this could be an in-progress request
+				# TODO clean these up somehow...
 				@noMetadata++
-				#return cacheFile.purge()
 
 			if size = metadata?['content-length']
 				return FS.stat(cacheFile.getPath 'data').then (stat) =>
@@ -98,6 +99,7 @@ class Cleaner
 			else
 				@debug 'ok', file
 				Q()
+
 		.fail (error) =>
 			@debug 'error', file, error
 
