@@ -96,6 +96,7 @@ CacheMetadata::_processUpstreamMetadata = (response) ->
       @cacheFile.markUpdated()
 
       # let the app know we're done
+      @request.log '304 unmodified'
       @complete @request
 
       meta
