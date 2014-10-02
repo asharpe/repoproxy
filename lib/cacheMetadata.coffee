@@ -61,7 +61,9 @@ CacheMetadata::_getMeta = (thisRequest) ->
     # otherwise we're requesting new metadata from upstream
     r =
       url: @request.url
-      headers: _.clone(@request.headers)
+      headers: _.clone _.omit @request.headers, [
+        'range' # can't do range requests yet
+      ]
 
     # we'll try to send if-none-match or if-modified-since if we can
     if meta
