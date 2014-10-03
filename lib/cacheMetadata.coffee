@@ -58,11 +58,17 @@ CacheMetadata::_getMeta = (thisRequest) ->
 
       return meta
 
+    @request.debug 'headers received', @request.headers
     # otherwise we're requesting new metadata from upstream
     r =
       url: @request.url
       headers: _.clone _.omit @request.headers, [
         'range' # can't do range requests yet
+        # things we don't want to share with upstream since we can't handle them yet
+        'keep-alive'
+        'age'
+        'connection'
+        'proxy-connection'
       ]
 
     # we'll try to send if-none-match or if-modified-since if we can
@@ -82,6 +88,16 @@ Decide how to provide collapsed readers depending on the upstream response
 CacheMetadata::_processUpstreamMetadata = (response) ->
   @request.debug 'upstream response', response.status
   meta = response.headers or {}
+
+  # tidy up response headers ASAP
+  # CentOS 7 is still sucking at range handling
+  # see http://yum.baseurl.org/gitweb?p=urlgrabber.git;a=commit;h=d6f9b4c1bc7db1a9f663e5c3e453d69257871232
+  meta = _.omit meta, [
+    'keep-alive'
+    'vary'
+    'connection'
+    'accept-ranges'
+  ]
 
   if not meta.expiry and not (meta.etag or meta['last-modified'])
     meta.expiry = moment().add('minutes', 30)

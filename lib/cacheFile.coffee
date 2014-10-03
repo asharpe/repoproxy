@@ -90,9 +90,6 @@ Write the metadata to disk
 CacheFile::saveMetadata = (meta) ->
   @makeTree("meta").then =>
     FS.write @getPath("meta"), JSON.stringify _.omit meta, [
-        'connection'
-        'keep-alive'
-        'accept-ranges'
         'mtime' # we added this ourselves, let's not store it as well
       ]
 
