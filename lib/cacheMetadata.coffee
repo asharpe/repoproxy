@@ -92,6 +92,7 @@ CacheMetadata::_processUpstreamMetadata = (response) ->
   # tidy up response headers ASAP
   # CentOS 7 is still sucking at range handling
   # see http://yum.baseurl.org/gitweb?p=urlgrabber.git;a=commit;h=d6f9b4c1bc7db1a9f663e5c3e453d69257871232
+  # also https://bugzilla.redhat.com/show_bug.cgi?id=624431
   meta = _.omit meta, [
     'keep-alive'
     'vary'
