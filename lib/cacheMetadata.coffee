@@ -59,33 +59,37 @@ CacheMetadata::_getMeta = (thisRequest) ->
       return meta
 
     @request.debug 'headers received', @request.headers
-    # otherwise we're requesting new metadata from upstream
-    r =
-      url: @request.url
-      headers: _.clone _.omit @request.headers, [
-        'range' # can't do range requests yet
-        # things we don't want to share with upstream since we can't handle them yet
-        'keep-alive'
-        'age'
-        'connection'
-        'proxy-connection'
-      ]
+    @_requestUpstreamMetadata meta
 
-    # we'll try to send if-none-match or if-modified-since if we can
-    if meta
-      r.headers['if-none-match'] = meta.etag if meta.etag
-      r.headers['if-modified-since'] = meta['last-modified'] if meta['last-modified']
 
-    @request.debug 'getting upstream metadata', r
-    Q.all([
-      HTTP.request(r)
-    ]).spread @_processUpstreamMetadata.bind @
+CacheMetadata::_requestUpstreamMetadata = (meta, url) ->
+  r =
+    url: url or @request.url
+    headers: _.clone _.omit @request.headers, [
+      'range' # can't do range requests yet
+      # things we don't want to share with upstream since we can't handle them yet
+      'keep-alive'
+      'age'
+      'connection'
+      'proxy-connection'
+    ]
+
+  # we'll try to send if-none-match or if-modified-since if we can
+  if meta
+    r.headers['if-none-match'] = meta.etag if meta.etag
+    r.headers['if-modified-since'] = meta['last-modified'] if meta['last-modified']
+
+  @request.debug 'getting upstream metadata', r
+  Q.all([
+    HTTP.request(r)
+    meta
+  ]).spread @_processUpstreamMetadata.bind @
 
 
 ###
 Decide how to provide collapsed readers depending on the upstream response
 ###
-CacheMetadata::_processUpstreamMetadata = (response) ->
+CacheMetadata::_processUpstreamMetadata = (response, originalMeta) ->
   @request.debug 'upstream response', response.status
   meta = response.headers or {}
 
@@ -121,16 +125,8 @@ CacheMetadata::_processUpstreamMetadata = (response) ->
       meta
 
     when 300 < response.status < 400 # redirect
-      # we should do the redirect and pass the response to all requests
-      # TODO I think there might be some recursion here - need to think this out a bit more
-      #request.log "redirecting to " + upstreamResponse.headers.location
-      #@_appComplete request, Apps.redirect(request, upstreamResponse.headers.location, upstreamResponse.status)
-
-      # let the app know we're done
-      @complete @request
-
-      # TODO these will fail for now
-      meta
+      # TODO keep track of how many redirects we'll follow
+      @_requestUpstreamMetadata originalMeta, response.headers.location
 
     else # actual response
       @request.log 'serving upstream file'
