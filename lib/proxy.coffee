@@ -32,8 +32,18 @@ This is the entry point in to the proxy, a request comes in,
 a response goes out.
 ###
 Proxy::application = (request, response) ->
+
+  # detect when the client bails
+  request.connection.on 'close', (had_error) =>
+    request.debug 'client closed connection'
+    # we need to let _appCacheable know about this
+    # we're really working around a problem upstream which is recognised
+    # by yum cancelling a slow connection
+    request.client_disconnect = true
+
   @normaliseRequest request
 
+  request.client_disconnect = false
   request.k = @_counter++
   request.log = (messages...) =>
     @log "{#{request.k}}", messages...
@@ -45,15 +55,22 @@ Proxy::application = (request, response) ->
   @_cacher.getCacheFile(request.url)
     .then (cacheFile) =>
       if cacheFile
-        @_appCacheable request, cacheFile, response
+        @_appCacheable(request, cacheFile, response)
+          .catch (error) ->
+            # TODO this catch block may be unnecessary
+            Apps.ok(
+              "#{error}", # just convert the error to string for now
+              'text/plain',
+              502 # gateway error - probably true
+            )
 
       else
         # not cacheable, just silently proxy
         request.log 'passthrough - not caching'
+        # TODO timeout settings
         HTTP.request request.url
 
-    .fail (error) ->
-      request.log "#{error}"
+    .catch (error) ->
       Apps.ok(
         "#{error}", # just convert the error to string for now
         'text/plain',
@@ -126,6 +143,16 @@ Proxy::_appCacheable = (currentRequest, cacheFile, response) ->
     response = Apps.ok reader, meta['content-type'] or 'text/plain', meta._status or 200
     # TODO are we caching redirects?  I think we might be following them without caching further down
     response.headers['location'] = meta['location'] if meta['location']
+
+    # TODO this looks marginally fragile ;)
+    # after the file is written we'll check to see if the client disconnected at some point
+    # during the request and remove the file in that case (eg. slow download with yum)
+    reader._writer._writer.node.on 'close', () ->
+      currentRequest.debug "checking to see if the client disconnected before completion"
+      if currentRequest.client_disconnect
+        currentRequest.debug 'removing (potentially) bogus cacheFile'
+        cacheFile.purge()
+
     response
 
 
