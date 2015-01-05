@@ -3,15 +3,14 @@
 	"description": "Mirror repositories while you proxy them",
 	"version": "0.0.0",
 	"dependencies": {
-		"q": "0.9.x",
-		"q-io": "1.10.x",
+		"q": "2.0.x",
+		"q-io": "1.11.x",
 		"underscore": "1.5.x",
 		"underscore.string": "2.3.x",
-		"js-yaml": "2.1.x",
+		"js-yaml": "3.2.x",
 		"moment": "2.4.x",
-		"findit": "0.1.x",
-		"coffee-script": "1.6.x",
-		"winston": "0.7.x"
+		"findit": "2.0.x",
+		"coffee-script": "1.6.x"
 	},
 	"devDependencies": {
 		"mocha": "1.14.x",
